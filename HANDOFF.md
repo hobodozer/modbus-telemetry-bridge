@@ -37,6 +37,7 @@ new hat checks, after every change below.
 - `src/ModbusBridge.Core/Inputs/PcStatsCollector.cs` - host stats, BCL + kernel32 only, no NuGet.
 - `BridgeEngine.PublishBridgeStatus()` - protocol version, connected clients, telemetry age, game code.
 - Four-contact and **discrete** vJoy hats (`VJoyPovSource`, `VJoyPovKind`, `SetDiscretePov`).
+- vJoy **shift layers** - a modifier contact remaps buttons while held.
   The device here has 0 continuous + 1 discrete POV, so hats could not have worked before.
 - Learn dialog (vJoy tab) and output test panel (Devices tab).
 - Theme fixes: `ComboBox` retemplated, styles for `ToolTip`/`ComboBoxItem`/`ContextMenu`/`MenuItem`.

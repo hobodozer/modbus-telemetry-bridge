@@ -398,6 +398,21 @@ internal static class Program
         {
             Tag = "vjoy.testNc", Button = 4, Mode = VJoyButtonMode.Momentary, Invert = true
         });
+        // Shift layers: button 5 normally, button 6 while the modifier is held. The base mapping
+        // for the same tag must stop driving button 5 the moment the layer takes over.
+        vjoyDevice.Layers.Add(new VJoyShiftLayer
+        {
+            Name = "shift", ModifierTag = "vjoy.testShift", Priority = 1
+        });
+        vjoyDevice.Buttons.Add(new VJoyButtonMapping
+        {
+            Tag = "vjoy.testLayered", Button = 5, Mode = VJoyButtonMode.Momentary
+        });
+        vjoyDevice.Buttons.Add(new VJoyButtonMapping
+        {
+            Tag = "vjoy.testLayered", Button = 6, Mode = VJoyButtonMode.Momentary, Layer = "shift"
+        });
+
         vjoyDevice.Axes.Add(new VJoyAxisMapping
         {
             Tag = "vjoy.testAxis", Axis = VJoyAxis.X, InputMin = 0, InputMax = 100

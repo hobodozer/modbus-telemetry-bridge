@@ -17,6 +17,15 @@ internal sealed class ButtonRuntime
     public bool HasSeenInput;
 }
 
+/// <summary>A shift layer with its modifier tag resolved.</summary>
+internal sealed class LayerRuntime
+{
+    public required VJoyShiftLayer Config { get; init; }
+    public required TagEntry Modifier { get; init; }
+
+    public bool IsHeld => (Modifier.Value.Number >= Config.Threshold) ^ Config.Invert;
+}
+
 internal sealed class AxisRuntime
 {
     public required VJoyAxisMapping Config { get; init; }
@@ -79,6 +88,9 @@ public sealed class VJoyStatistics
     public double LoopIntervalMs;
     public double MaxLoopIntervalMs = double.NaN;
     public int ButtonsPressed;
+
+    /// <summary>Shift layer currently held, or empty for the base layer.</summary>
+    public string ActiveLayer = "";
     public bool Released;
 
     public void Reset()
@@ -98,6 +110,10 @@ public sealed class VJoyFeeder : IAsyncDisposable
     private readonly List<ButtonRuntime> _buttons = new();
     private readonly List<AxisRuntime> _axes = new();
     private readonly List<PovRuntime> _povs = new();
+    private readonly List<LayerRuntime> _layers = new();
+
+    /// <summary>Layer/tag pairs, so a base mapping can tell when a layer overrides the same tag.</summary>
+    private readonly HashSet<(string Layer, string Tag)> _overrides = new();
 
     private VJoyDevice? _device;
     private CancellationTokenSource? _cts;
@@ -126,7 +142,16 @@ public sealed class VJoyFeeder : IAsyncDisposable
     private void Bind()
     {
         foreach (var mapping in _config.Buttons.Where(b => b.Enabled && !string.IsNullOrWhiteSpace(b.Tag)))
+        {
             _buttons.Add(new ButtonRuntime { Config = mapping, Tag = _bus.GetOrAdd(mapping.Tag) });
+            if (!string.IsNullOrWhiteSpace(mapping.Layer))
+                _overrides.Add((mapping.Layer.ToLowerInvariant(), mapping.Tag.ToLowerInvariant()));
+        }
+
+        foreach (var layer in _config.Layers.Where(l => l.Enabled
+                                                       && !string.IsNullOrWhiteSpace(l.Name)
+                                                       && !string.IsNullOrWhiteSpace(l.ModifierTag)))
+            _layers.Add(new LayerRuntime { Config = layer, Modifier = _bus.GetOrAdd(layer.ModifierTag) });
 
         foreach (var mapping in _config.Axes.Where(a => a.Enabled && !string.IsNullOrWhiteSpace(a.Tag)))
             _axes.Add(new AxisRuntime { Config = mapping, Tag = _bus.GetOrAdd(mapping.Tag) });
@@ -173,6 +198,22 @@ public sealed class VJoyFeeder : IAsyncDisposable
         Log.Info("vjoy", $"Feeding device {_config.DeviceId}: {_buttons.Count} button(s), " +
                          $"{_axes.Count} axis/axes, {_povs.Count} POV(s) every {_config.UpdateIntervalMs} ms.");
         return true;
+    }
+
+    /// <summary>
+    /// Whether a mapping drives its button right now. A mapping belonging to the active layer
+    /// always does; a base mapping does unless the active layer redefines the same tag - so a
+    /// panel is mapped once and a layer only lists what changes.
+    /// </summary>
+    private bool IsActiveIn(ButtonRuntime button, string activeLayer)
+    {
+        var layer = button.Config.Layer;
+
+        if (!string.IsNullOrWhiteSpace(layer))
+            return string.Equals(layer, activeLayer, StringComparison.OrdinalIgnoreCase);
+
+        if (activeLayer.Length == 0) return true;
+        return !_overrides.Contains((activeLayer.ToLowerInvariant(), button.Config.Tag.ToLowerInvariant()));
     }
 
     /// <summary>Catches mappings that point at controls the device is not configured for.</summary>
@@ -306,11 +347,37 @@ public sealed class VJoyFeeder : IAsyncDisposable
             changed = true;
         }
 
+        // Highest priority wins when two modifiers are held, so overlapping layers resolve
+        // predictably instead of by declaration order.
+        string activeLayer = "";
+        var bestPriority = int.MinValue;
+        foreach (var layer in _layers)
+        {
+            if (!layer.IsHeld || layer.Config.Priority <= bestPriority) continue;
+            bestPriority = layer.Config.Priority;
+            activeLayer = layer.Config.Name;
+        }
+        Statistics.ActiveLayer = activeLayer;
+
         foreach (var button in _buttons)
         {
             var value = button.Tag.Value;
             var raw = value.Number >= button.Config.Threshold;
             var input = raw ^ button.Config.Invert;
+
+            if (!IsActiveIn(button, activeLayer))
+            {
+                // Release rather than leave it stuck, and keep edge tracking current so returning
+                // to this layer does not read as a fresh press. A toggle keeps its latch.
+                button.LastInput = input;
+                button.HasSeenInput = true;
+                if (device.GetButton(button.Config.Button))
+                {
+                    device.SetButton(button.Config.Button, false);
+                    changed = true;
+                }
+                continue;
+            }
 
             bool output;
             switch (button.Config.Mode)

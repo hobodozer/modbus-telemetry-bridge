@@ -146,6 +146,42 @@ internal static class VJoyEndToEndChecks
         await Task.Delay(120);
         check(IsPressed(reader.Index, 1), "button held ahead of the bad-quality check");
 
+        // ---- Shift layers ----
+        var layered = engine.Tags.GetOrAdd("vjoy.testLayered");
+        var shift = engine.Tags.GetOrAdd("vjoy.testShift");
+        layered.Force(TagValue.Good(false));
+        shift.Force(TagValue.Good(false));
+        await Task.Delay(120);
+
+        layered.Force(TagValue.Good(true));
+        await Task.Delay(120);
+        check(IsPressed(reader.Index, 5) && !IsPressed(reader.Index, 6),
+              "base layer: the contact drives button 5, not 6");
+
+        // Switching layer with the contact still held is the case that leaves a button stuck.
+        shift.Force(TagValue.Good(true));
+        await Task.Delay(150);
+        check(IsPressed(reader.Index, 6), "shift layer: the same contact now drives button 6");
+        check(!IsPressed(reader.Index, 5), "shift layer: button 5 released, not left stuck");
+
+        shift.Force(TagValue.Good(false));
+        await Task.Delay(150);
+        check(IsPressed(reader.Index, 5) && !IsPressed(reader.Index, 6),
+              "releasing the modifier returns the contact to button 5");
+
+        layered.Force(TagValue.Good(false));
+        await Task.Delay(120);
+        check(!IsPressed(reader.Index, 5) && !IsPressed(reader.Index, 6),
+              "releasing the contact clears both layers");
+
+        // The offline failsafe below requires EVERY button-driving tag to be bad, so these two
+        // have to be retired as well or it correctly declines to fire.
+        foreach (var tag in new[] { layered, shift })
+        {
+            tag.Unforce();
+            tag.DemoteQuality(ModbusBridge.Core.Data.TagQuality.Bad);
+        }
+
         // ---- Hat driven by four contacts ----
         // Read back through winmm's own dwPOV rather than the report struct, for the same reason
         // the buttons are: a wrong field or a wrong pool would still "succeed" on write.

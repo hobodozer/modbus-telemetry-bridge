@@ -274,6 +274,23 @@ and a device configured for one has none of the other, so a mismatch silently do
 dashboard warns when it happens. Continuous hats get eight-way resolution including diagonals;
 discrete hats have only four positions, so diagonals round to the nearest of N/E/S/W.
 
+### Shift layers
+
+One physical button sending different vJoy buttons depending on a modifier, so a 60-button panel
+can reach far more than 60 functions.
+
+Define a layer with a `name` and a `modifierTag` - any tag, so the shift can be a PLC contact, an
+HMI soft button, or even a telemetry condition. Then give a button mapping a `layer` matching that
+name.
+
+Mappings with no `layer` are the base layer, and they keep working under a shift **unless that
+layer redefines the same tag**. So a panel is mapped once and a layer only lists what changes,
+rather than being re-declared in full.
+
+When several modifiers are held at once, the highest `priority` wins, so overlapping layers resolve
+predictably instead of by declaration order. Switching layers while a button is still held releases
+the outgoing button rather than leaving it stuck - the case worth testing, and the smoke test does.
+
 ### Safety
 
 `releaseOnBadQuality` (on by default) releases every control and centres every axis if all the
@@ -490,8 +507,6 @@ The UI self-test (`--selftest`) walks every tab and fails the build on any WPF b
 ## Not yet built
 
 - **Keyboard / macro output** - for games that ignore joystick input for certain functions.
-- **Shift layers** for vJoy buttons, so one physical button can send different vJoy buttons
-  depending on a modifier contact.
 - **GPU utilisation** - the host statistics collector uses only the BCL and two kernel32 calls to
   keep the published executable dependency-free, and GPU load needs performance counters.
 - **Chunked telemetry schema.** The property catalogue is chunked across datagrams; the schema is
