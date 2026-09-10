@@ -130,6 +130,17 @@ switch ($Task) {
         $url = git -C $root remote get-url origin
         if (-not $url) { throw "No 'origin' remote to clone from." }
 
+        # This clones the REMOTE, so unpushed commits are not in what it builds. Run before a push
+        # it validates the previous remote and reports success, which is worse than not running it
+        # - that already happened once and the result was believed.
+        $ahead = git -C $root rev-list --count '@{upstream}..HEAD' 2>$null
+        if ($LASTEXITCODE -eq 0 -and [int]$ahead -gt 0) {
+            Write-Host "$ahead local commit(s) are not pushed." -ForegroundColor Yellow
+            Write-Host "verify-clone builds the remote, so it would test the tree WITHOUT them." -ForegroundColor Yellow
+            Write-Host "Push first, then run this again." -ForegroundColor Yellow
+            break
+        }
+
         "cloning $url"
         git clone -q --depth 1 $url $temp
         if ($LASTEXITCODE -ne 0) { throw "Clone failed." }

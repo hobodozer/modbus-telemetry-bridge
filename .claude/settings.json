@@ -7,8 +7,16 @@
       "Bash(git show:*)",
       "Bash(git branch:*)",
       "Bash(git remote:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(git archive:*)",
+      "Bash(git rev-list:*)",
+      "Bash(git rev-parse:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
+      "Bash(git reset:*)",
+
       "Bash(grep:*)",
       "Bash(find:*)",
       "Bash(wc:*)",
@@ -16,10 +24,30 @@
       "Bash(tail:*)",
       "Bash(cat:*)",
       "Bash(ls:*)",
+      "Bash(sed:*)",
+      "Bash(diff:*)",
+      "Bash(xxd:*)",
+      "Bash(sha256sum:*)",
+      "Bash(cygpath:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(timeout:*)",
+
       "Bash(python tools/:*)",
+      "Bash(python -c:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet run --project tools:*)",
+      "Bash(dotnet run --project tests:*)",
+      "Bash(dotnet sln:*)",
+      "Bash(pwsh -NoProfile -File ./rig.ps1:*)",
+      "Bash(pwsh -NoProfile -File tools/:*)",
+      "Bash(pwsh -NoProfile -File ./build.ps1:*)",
+
       "PowerShell(dotnet build:*)",
       "PowerShell(dotnet run --project tools:*)",
+      "PowerShell(dotnet run --project tests:*)",
       "PowerShell(pwsh -NoProfile -File .\\tools\\modbus-read.ps1:*)",
+      "PowerShell(pwsh -NoProfile -File .\\rig.ps1:*)",
       "PowerShell(Get-Content:*)",
       "PowerShell(Get-ChildItem:*)",
       "PowerShell(Get-Process:*)",
@@ -28,13 +56,16 @@
       "PowerShell(git status:*)",
       "PowerShell(git log:*)"
     ],
+
     "ask": [
       "PowerShell(Start-Process:*)",
       "PowerShell(Stop-Process:*)",
       "Bash(git push:*)",
-      "PowerShell(git push:*)"
+      "PowerShell(git push:*)",
+      "Bash(rm:*)"
     ]
   },
+
   "env": {
     "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
     "DOTNET_NOLOGO": "1"

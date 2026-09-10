@@ -44,6 +44,17 @@ dotnet run --project tools\store-probe                                # bench + 
 open handle to its own exe, and the resulting link error names nothing useful. It does not
 restart it; `.\rig.ps1 build` does both.
 
+## Slash commands
+
+| | |
+| --- | --- |
+| `/bughunt` | Targets the classes a reading pass cannot see, and requires a probe that fails before a finding counts |
+| `/ship` | check -> docs -> build -> commit -> push -> verify-clone, in the order that actually proves the tree |
+| `/doccheck` | Audits the docs against the tree and reports before editing |
+
+They live in `.claude/commands/`. Each encodes an ordering or a habit that has already been got
+wrong here, so prefer them to improvising the sequence.
+
 ## Traps that have already cost hours
 
 - **`ScalingConfig.Min`/`Max` are nullable; null disables the clamp.** Writing `0`/`0` pins every
@@ -53,28 +64,31 @@ restart it; `.\rig.ps1 build` does both.
 - **SimHub property names are fully qualified** (`DataCorePlugin.GameData.SpeedKmh`). FS25 mod data
   is under `DataCorePlugin.GameRawData.*`. Units differ between adjacent fields - `dayTime` is
   seconds, `currentPhysicsTime` is milliseconds. Measure by watching a value change; do not assume.
-- **The plugin's schema is one datagram and is not chunked.** Too many subscriptions used to throw
-  inside SimHub's `DataUpdate`, killing telemetry invisibly. Evidence lives in
-  `C:\Program Files (x86)\SimHub\Logs\SimHub.txt` - check it whenever frames stop.
+- **The schema is chunked now, but the INSTALLED plugin may not know that.** Wire version is 2 and
+  `MaxDatagram` is 60000; version 1 plugins still work and the bridge logs which one it is talking
+  to. Until the plugin is reinstalled (needs elevation, SimHub closed) subscriptions stay capped at
+  one datagram in practice. When frames stop, the evidence is in
+  `C:\Program Files (x86)\SimHub\Logs\SimHub.txt` - an oversized schema used to throw inside
+  SimHub's `DataUpdate` and kill telemetry silently.
 - **The PLC's `MB_SERVER` serves exactly ONE TCP connection.** While the bridge polls, anything else
   aimed at 192.0.2.10 gets "connection refused". Read the bridge's server instead.
-- **A client write must never reach a read-only register.** `ServerDataStore` overlays an incoming
-  write onto the block image, and it once did so *before* checking writability - so a refused
-  write still rewrote every read-only point it covered, and they reported the client's bytes
-  until their tags next moved. Blocks now carry a writable-coverage mask (per *bit* for register
-  areas, so a packed bit cannot clobber a read-only neighbour in the same word). If you touch
-  `ApplyWrite`, run `dotnet run --project tools\store-probe`.
-- **Anything per-request must not be done per-register.** `Refresh()` was called inside the
-  address loop, making a read O(count x points): 1.9 ms for a 125-register read of a 317-point
-  block. Only `holdLastValue` with no stale timeout hid it, and that is the one combination the
-  live config uses - `DefaultConfig` ships `Failsafe`/2000 and did not. The probe prints a curve;
-  read cost must stay flat as the map grows.
+- **Never say a program is running without checking the process list.** `Get-Process` settles it in
+  one call. Reading it off a value the bridge happens to hold produced a confident false claim three
+  times in one session. Related and separate: SimHub's **active** game is not its **running** game -
+  it keeps a game selected long after that game exits, so `bridge.gameCode` (142) and
+  `bridge.simhubGame` (144) stay set while `sim.gameRunning` (138) is the one that answers
+  "is it running". FINDINGS section 18. Do not "fix" the held name by blanking it.
 - **A tag's `Version` bumps on every accepted write, including a republish of an unchanged
   value.** The engine republishes `bridge.*` and the derived tags every housekeeping pass, so
   "has this changed?" cannot be answered by comparing versions. `TagRecorder.onChangeOnly` did
   exactly that and wrote a row per interval. Do not "fix" this in `TagEntry.Set`: an unchanged
   republish must still refresh the timestamp, or `SweepStale` demotes a live input that happens
   to sit at zero.
+- **Two fixed bugs in `ServerDataStore` that must not come back** - both guarded, so run
+  `.\rig.ps1 probe` after touching the read or write path. A client write must not reach a
+  read-only register (writes are masked to writable coverage, per *bit* in register areas), and
+  nothing per-request may be done per-register (`Refresh()` in the address loop made reads
+  O(count x points)). FINDINGS section 17 has the measurements and the reasoning.
 - **The smoke test's 10 ms timing check is unreliable and has been wrong twice.** Timer resolution
   is per-process since Windows 10 2004, and the background test process does not get what the
   windowed app gets, so it reports ~15.6 ms cycles while the real bridge holds 10.3 ms. **Measure
@@ -122,19 +136,29 @@ So, when you finish a change:
 Do it in the commit that makes the change true, not in a documentation pass afterwards - the pass
 afterwards is the one that never happens.
 
-**Windows paths in documentation are a live hazard.** A tool call writing `rig\config\bridge.json`
-through a shell heredoc can have the `\b` interpreted as a backspace, and the damage is invisible in
-a rendered view. After editing any doc containing a Windows path, check it:
+**Windows paths written through a shell heredoc get corrupted.** `rig\config\bridge.json` can come
+out with the `\b` interpreted as a backspace, and the damage is invisible in a rendered view. Eleven
+commands in this repository were broken this way.
 
-```powershell
-git diff | Select-String -Pattern "[\x00-\x08\x0b\x0c\x0e-\x1f]"   # must print nothing
-```
+**Use the Write and Edit tools for any file containing a backslash.** That is the fix. Escaping the
+heredoc harder is not - it failed roughly five times in one session before the tools were used
+instead. If a heredoc is unavoidable, build the backslash as a value (`B = chr(92)` in Python) and
+never type it literally.
+
+To check afterwards, run `.\rig.ps1 check`. Do not hand-roll the regex: the obvious
+`[\x00-\x08\x0b\x0c\x0e-\x1f]` **excludes `\x0d`**, and CR was seven of those eleven corruptions -
+`.\rig.ps1` becoming `.` + CR + `ig.ps1`. A lone CR is damage; a CR followed by LF is a line ending.
+`repo-check.py --self-test` asserts that distinction still holds.
 
 ## Working style that fits this project
 
 - **A passing local build says nothing about the repository.** A `.gitignore` rule once matched
   a source directory and kept nine files out of the commit; every local build still passed and a
-  fresh clone failed with 54 errors. Run `.\rig.ps1 verify-clone` before trusting a push.
+  fresh clone failed with 54 errors.
+
+  `.\rig.ps1 check` catches that class before you commit. `.\rig.ps1 verify-clone` proves it, but
+  **it clones `origin`, so run it after the push, not before** - run early it silently validates
+  the previous remote and reports success. It now refuses to run when HEAD is ahead of origin.
 
 - **Verify through a different path than the one that wrote the data.** vJoy is checked via winmm,
   the Modbus server via a real client socket, the HMI via `tshark`. Do this rather than trusting

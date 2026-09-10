@@ -34,6 +34,11 @@ if (-not $SkipTests) {
     # a source file .gitignore excludes, a project missing from the solution, a command
     # corrupted by an interpreted backslash escape. Run first so it fails fast.
     Step "Checking repository consistency"
+    # The self-test first: a claim pattern that silently stops matching still reports "ok",
+    # which is the one failure mode the checks below cannot survive. It already happened -
+    # a case-sensitive pattern walked past a false trap in CLAUDE.md itself.
+    python tools\repo-check.py --self-test | Select-String -Pattern "FAIL" -Quiet |
+        ForEach-Object { if ($_) { throw "repo-check self-test failed - run: python tools\repo-check.py --self-test" } }
     python tools\repo-check.py --quiet
     if ($LASTEXITCODE -ne 0) { throw "repo-check failed - see above." }
     Write-Host "    repo-check passed." -ForegroundColor Green

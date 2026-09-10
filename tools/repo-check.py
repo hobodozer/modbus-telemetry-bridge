@@ -220,27 +220,64 @@ def check_doc_paths_exist(report):
         report.ok("all {0} referenced path(s) exist".format(len(seen)))
 
 
+class Claim:
+    """A phrase that would be false, paired with the file whose existence makes it false.
+
+    `example` is a sentence the pattern MUST match and `counter` one it must NOT. --self-test
+    checks both. That is not ceremony: the schema pattern was written as "schema is NOT" and so
+    was case-sensitive, and it walked straight past "the schema is one datagram and is not
+    chunked" in this project's own CLAUDE.md - the file loaded into every session. A pattern that
+    silently stops matching is worse than no pattern, because the check still reports "ok".
+    """
+
+    def __init__(self, label, evidence, pattern, example, counter):
+        self.label = label
+        self.evidence = evidence
+        self.pattern = re.compile(pattern, re.I)
+        self.example = example
+        self.counter = counter
+
+
+# Every pattern is case-insensitive. Documentation does not capitalise consistently, and relying
+# on it to is how the one above got through.
+CLAIMS = [
+    Claim("GPU collection", "src/ModbusBridge.Core/Inputs/GpuCounter.cs",
+          r"GPU[^.\n]{0,60}(not collected|does not gather|is not gathered|is not collected)",
+          "GPU load is not collected: it needs performance counters",
+          "GPU load is collected through PDH"),
+    Claim("keyboard output", "src/ModbusBridge.Core/Outputs/Keyboard/KeyboardFeeder.cs",
+          r"keyboard[^.\n]{0,60}not started",
+          "Keyboard / macro output, vJoy shift layers | Not started |",
+          "Keyboard output ships with dryRun on"),
+    Claim("network scanner", "src/ModbusBridge.Core/Modbus/ModbusScanner.cs",
+          r"network scanner[^.\n]{0,60}not started",
+          "Network scanner, derived-tag expressions | Not started |",
+          "Network scanner finds devices on a subnet"),
+    Claim("CSV record/replay", "src/ModbusBridge.Core/Inputs/TagReplayer.cs",
+          r"record/replay[^.\n]{0,60}not started",
+          "CSV record/replay is Not started",
+          "CSV record/replay is complete"),
+    Claim("derived tags", "src/ModbusBridge.Core/Data/Expression.cs",
+          r"derived[- ]tag[^.\n]{0,60}not started",
+          "derived-tag expressions are Not started",
+          "derived tags are configurable now"),
+    Claim("schema chunking", "shared/TelemetryProtocol.cs",
+          r"schema[^.\n]{0,60}(is not chunked|is NOT|not chunked)",
+          "The plugin's schema is one datagram and is not chunked.",
+          "The schema is chunked, and the old ceiling is gone"),
+    Claim("shift layers", "src/ModbusBridge.Core/Outputs/VJoy/VJoyFeeder.cs",
+          r"shift layers[^.\n]{0,60}not started",
+          "vJoy shift layers | Not started |",
+          "vJoy shift layers remap buttons while a modifier is held"),
+]
+
+
 def check_stale_claims(report):
     """README claimed five shipped features were "Not started", and said GPU load was not
     collected in four places while the collector had been running for a day. This cannot be fully
     automated, so each entry pairs a phrase with the file whose existence disproves it."""
     report.check("Documented gaps against what is actually built")
-    claims = [
-        ("GPU collection", "src/ModbusBridge.Core/Inputs/GpuCounter.cs",
-         re.compile(r"GPU[^.\n]{0,60}(not collected|does not gather|is not gathered)", re.I)),
-        ("keyboard output", "src/ModbusBridge.Core/Outputs/Keyboard/KeyboardFeeder.cs",
-         re.compile(r"[Kk]eyboard[^.\n]{0,60}[Nn]ot started")),
-        ("network scanner", "src/ModbusBridge.Core/Modbus/ModbusScanner.cs",
-         re.compile(r"[Nn]etwork scanner[^.\n]{0,60}[Nn]ot started")),
-        ("CSV record/replay", "src/ModbusBridge.Core/Inputs/TagReplayer.cs",
-         re.compile(r"record/replay[^.\n]{0,60}[Nn]ot started")),
-        ("derived tags", "src/ModbusBridge.Core/Data/Expression.cs",
-         re.compile(r"derived[- ]tag[^.\n]{0,60}[Nn]ot started", re.I)),
-        ("schema chunking", "shared/TelemetryProtocol.cs",
-         re.compile(r"schema is NOT")),
-        ("shift layers", "src/ModbusBridge.Core/Outputs/VJoy/VJoyFeeder.cs",
-         re.compile(r"shift layers[^.\n]{0,60}[Nn]ot started")),
-    ]
+    claims = [(c.label, c.evidence, c.pattern) for c in CLAIMS]
 
     live = {}
     for path in git("ls-files", "*.md"):
@@ -291,12 +328,65 @@ CHECKS = [
 ]
 
 
+def self_test():
+    """Checks the checker. A pattern that stops matching still reports "ok", which is the one
+    failure mode this whole file cannot survive."""
+    failures = 0
+
+    print("Claim patterns")
+    for claim in CLAIMS:
+        if not claim.pattern.search(claim.example):
+            print("  FAIL  {0}: does not match its own example - {1!r}"
+                  .format(claim.label, claim.example))
+            failures += 1
+        elif claim.pattern.search(claim.counter):
+            print("  FAIL  {0}: matches text that should be fine - {1!r}"
+                  .format(claim.label, claim.counter))
+            failures += 1
+        else:
+            print("  ok    " + claim.label)
+
+    print()
+    print("Escape-damage detection")
+    # CR is the case that matters most and is easiest to leave out: a naive "control character"
+    # range written as \x00-\x08\x0b\x0c\x0e-\x1f skips \x0d, and CR was seven of the eleven
+    # corruptions found in this repository.
+    samples = [
+        ("backspace from an interpreted " + chr(92) + "b", b".\x08uild.ps1", True),
+        ("carriage return from an interpreted " + chr(92) + "r", b".\x0dig.ps1", True),
+        ("a legitimate CRLF line ending", b"line one\x0d\x0aline two", False),
+        ("ordinary text", b"nothing wrong here", False),
+    ]
+    for label, data, should_flag in samples:
+        crlf = data.count(bytes([CR, 10]))
+        lone_cr = data.count(bytes([CR])) - crlf
+        control = sum(data.count(bytes([c])) for c in FORBIDDEN)
+        flagged = bool(lone_cr or control)
+        if flagged != should_flag:
+            print("  FAIL  {0}: flagged={1}, expected {2}".format(label, flagged, should_flag))
+            failures += 1
+        else:
+            print("  ok    " + label)
+
+    print()
+    if failures:
+        print("{0} self-test failure(s) - the checks above cannot be trusted".format(failures))
+        return 1
+    print("self-test clean")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--quiet", action="store_true", help="only print failures")
     parser.add_argument("--list", action="store_true", help="describe the checks and exit")
+    parser.add_argument("--self-test", action="store_true",
+                        help="check the checker: every pattern must match its own example")
     args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     if args.list:
         for fn in CHECKS:
