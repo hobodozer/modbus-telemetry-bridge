@@ -1,8 +1,8 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 
-namespace ModbusBridge.App.ViewModels;
+namespace ModbusBridge.ViewModels;
 
 public abstract class ObservableObject : INotifyPropertyChanged
 {
@@ -21,6 +21,23 @@ public abstract class ObservableObject : INotifyPropertyChanged
 }
 
 /// <summary>Minimal ICommand so the XAML can bind buttons without pulling in an MVVM framework.</summary>
+/// <summary>
+/// How a command's CanExecute gets re-evaluated. WPF does this globally through
+/// <c>CommandManager.RequerySuggested</c>, which fires on UI activity and keeps buttons enabled or
+/// disabled without anyone asking. Avalonia has no equivalent - a command raises its own event.
+///
+/// So the shared commands raise their own event, and a host that HAS a global requery wires it in
+/// here. WPF does; Avalonia leaves it null and gets explicit behaviour. Without this the WPF app
+/// would silently lose automatic button enabling, which is the kind of regression that is noticed
+/// weeks later by a button that will not click.
+/// </summary>
+public static class CommandRequery
+{
+    public static Action<EventHandler>? Subscribe;
+    public static Action<EventHandler>? Unsubscribe;
+    public static Action? InvalidateAll;
+}
+
 public sealed class RelayCommand : ICommand
 {
     private readonly Action<object?> _execute;
@@ -37,11 +54,24 @@ public sealed class RelayCommand : ICommand
     {
     }
 
+    private EventHandler? _canExecuteChanged;
+
     public event EventHandler? CanExecuteChanged
     {
-        add => CommandManager.RequerySuggested += value;
-        remove => CommandManager.RequerySuggested -= value;
+        add
+        {
+            _canExecuteChanged += value;
+            if (value is not null) CommandRequery.Subscribe?.Invoke(value);
+        }
+        remove
+        {
+            _canExecuteChanged -= value;
+            if (value is not null) CommandRequery.Unsubscribe?.Invoke(value);
+        }
     }
+
+    /// <summary>Re-evaluates this command. Only needed where there is no global requery.</summary>
+    public void RaiseCanExecuteChanged() => _canExecuteChanged?.Invoke(this, EventArgs.Empty);
 
     public bool CanExecute(object? parameter) => _canExecute?.Invoke(parameter) ?? true;
 
@@ -61,18 +91,31 @@ public sealed class AsyncRelayCommand : ICommand
         _canExecute = canExecute is null ? null : _ => canExecute();
     }
 
+    private EventHandler? _canExecuteChanged;
+
     public event EventHandler? CanExecuteChanged
     {
-        add => CommandManager.RequerySuggested += value;
-        remove => CommandManager.RequerySuggested -= value;
+        add
+        {
+            _canExecuteChanged += value;
+            if (value is not null) CommandRequery.Subscribe?.Invoke(value);
+        }
+        remove
+        {
+            _canExecuteChanged -= value;
+            if (value is not null) CommandRequery.Unsubscribe?.Invoke(value);
+        }
     }
+
+    public void RaiseCanExecuteChanged() => _canExecuteChanged?.Invoke(this, EventArgs.Empty);
 
     public bool CanExecute(object? parameter) => !_running && (_canExecute?.Invoke(parameter) ?? true);
 
     public async void Execute(object? parameter)
     {
         _running = true;
-        CommandManager.InvalidateRequerySuggested();
+        RaiseCanExecuteChanged();
+        CommandRequery.InvalidateAll?.Invoke();
         try
         {
             await _execute(parameter);
@@ -80,7 +123,8 @@ public sealed class AsyncRelayCommand : ICommand
         finally
         {
             _running = false;
-            CommandManager.InvalidateRequerySuggested();
+            RaiseCanExecuteChanged();
+            CommandRequery.InvalidateAll?.Invoke();
         }
     }
 }

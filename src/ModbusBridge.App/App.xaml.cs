@@ -1,4 +1,5 @@
-using System.IO;
+using System.Windows.Input;
+﻿using System.IO;
 using System.Windows;
 using ModbusBridge.App.Diagnostics;
 using ModbusBridge.App.ViewModels;
@@ -16,6 +17,13 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // The shared view models cannot reference CommandManager - they are net8.0 and have to work
+        // under Avalonia too - so WPF supplies its global requery here. Without this, buttons stop
+        // enabling and disabling on their own.
+        CommandRequery.Subscribe = handler => CommandManager.RequerySuggested += handler;
+        CommandRequery.Unsubscribe = handler => CommandManager.RequerySuggested -= handler;
+        CommandRequery.InvalidateAll = CommandManager.InvalidateRequerySuggested;
+
         base.OnStartup(e);
 
         DispatcherUnhandledException += (_, args) =>

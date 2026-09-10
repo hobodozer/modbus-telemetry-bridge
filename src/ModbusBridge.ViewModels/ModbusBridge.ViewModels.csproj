@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Plain net8.0: these are shared by the WPF app and the Avalonia one, so nothing in here
+         may reference a UI framework. That is enforced by the target, not by discipline. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>ModbusBridge.ViewModels</RootNamespace>
+    <AssemblyName>ModbusBridge.ViewModels</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ModbusBridge.Core\ModbusBridge.Core.csproj" />
+  </ItemGroup>
+
+</Project>
