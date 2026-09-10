@@ -581,6 +581,7 @@ tools/store-probe/            Bench + invariant check for the server data store
 tools/repo-check.py           Static consistency checks; run before pushing
 tools/config-query.py         Read-only queries against a config: find, gaps, blocks, tags
 tools/read-tag.ps1            Read a tag BY NAME - resolves address, decodes, applies scaling
+tools/health.ps1              Whole-chain health from the bridge's own status registers
 tools/code-map.py             Outline a C# file: types and members with line numbers
 tools/tia/                    Read a Siemens TIA Portal project through the Openness API
 build.ps1                     Build, test, publish

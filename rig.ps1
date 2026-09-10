@@ -8,6 +8,7 @@
 
 .EXAMPLE
     .\rig.ps1 status                 # is anything running, what does the log say
+    .\rig.ps1 health                 # the whole chain in one read: HMI, telemetry, game, host
     .\rig.ps1 build                  # stop the app, build, restart it
     .\rig.ps1 test                   # full build.ps1: smoke test + UI self-test
     .\rig.ps1 start / stop / restart
@@ -27,7 +28,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('status', 'build', 'test', 'start', 'stop', 'restart', 'read', 'tag', 'map',
+    [ValidateSet('status', 'health', 'build', 'test', 'start', 'stop', 'restart', 'read', 'tag', 'map',
                  'capture', 'log', 'errors', 'scan', 'check', 'config', 'probe', 'outline',
                  'verify-clone')]
     [string]$Task = 'status',
@@ -65,6 +66,7 @@ switch ($Task) {
         "simhub   : $(if (Get-Process SimHubWPF -ErrorAction SilentlyContinue) { 'running' } else { 'stopped' })"
         $log = Latest-Log
         if ($log) { ""; "--- $($log.Name) ---"; Get-Content $log.FullName -Tail 6 }
+        ""; "for the whole chain: .\rig.ps1 health"
     }
     'stop'    { Stop-Bridge }
     'start'   { Start-Bridge }
@@ -143,6 +145,9 @@ switch ($Task) {
             Pop-Location
             Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
         }
+    }
+    'health' {
+        & pwsh -NoProfile -File (Join-Path $root 'tools\health.ps1') -Config (Join-Path $data 'config\bridge.json')
     }
     'check' {
         python (Join-Path $root 'tools\repo-check.py') @($A, $B | Where-Object { $_ })

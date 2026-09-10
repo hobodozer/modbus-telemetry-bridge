@@ -28,6 +28,7 @@ pwsh -File .\tools\modbus-read.ps1 -Address 144 -Count 16 -Type string
 python tools\make-hmi-map.py rig\config\bridge.json --components 16   # regenerate the HMI map
 python tools\exob-map.py project.exob --types NE,AE --csv map.csv     # HMI address map from a compiled .exob
 
+.\rig.ps1 health                # whole chain in one read: HMI, telemetry, game, host stats
 .\rig.ps1 tag fs.fuelLevel      # read a tag BY NAME: address, decode and scaling in one step
 .\rig.ps1 config find fuel      # everything the config says about a tag or address
 .\rig.ps1 config gaps           # addresses a block reserves but no point covers
@@ -39,7 +40,9 @@ dotnet run --project tools\simhub-catalog                             # dump Sim
 dotnet run --project tools\store-probe                                # bench + invariant check for ServerDataStore
 ```
 
-The app locks its own exe - **stop `ModbusBridge` before building** or the copy step fails.
+`build.ps1` now stops a running `ModbusBridge` itself and says so at the end - the app holds an
+open handle to its own exe, and the resulting link error names nothing useful. It does not
+restart it; `.\rig.ps1 build` does both.
 
 ## Traps that have already cost hours
 

@@ -39,6 +39,17 @@ if (-not $SkipTests) {
     Write-Host "    repo-check passed." -ForegroundColor Green
 }
 
+# The running app holds an open handle to its own exe, so the copy step fails with a link
+# error that says nothing about the real cause. This was documented as a trap for months
+# and still cost a confusing failure, so handle it instead of warning about it.
+$running = Get-Process ModbusBridge -ErrorAction SilentlyContinue
+if ($running) {
+    Step "Stopping ModbusBridge (pid $($running.Id)) - it locks its own exe"
+    $running | Stop-Process -Force
+    Start-Sleep -Seconds 2
+    $script:WasRunning = $true
+}
+
 Step "Building ($Configuration)"
 dotnet build ModbusBridge.sln -c $Configuration --nologo -v minimal
 if ($LASTEXITCODE -ne 0) { throw "Build failed." }
@@ -113,6 +124,11 @@ if ($Publish) {
         Write-Host "    $($exe.FullName)" -ForegroundColor Green
         Write-Host ("    {0:N1} MB - copy this folder anywhere; no .NET install needed." -f ($exe.Length / 1MB))
     }
+}
+
+if ($script:WasRunning) {
+    Write-Host ""
+    Write-Host "    ModbusBridge was stopped for the build - restart it with: .\rig.ps1 start" -ForegroundColor Yellow
 }
 
 Step "Done"

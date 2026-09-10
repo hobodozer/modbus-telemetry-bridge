@@ -64,6 +64,9 @@ new hat checks, after every change below.
 - `tools/read-tag.ps1` - read a tag **by name**. Resolves the address from the config, reads
   it, decodes it and applies the scaling. Checking one value used to be three manual steps,
   and getting the scaling step wrong looks exactly like a dead data source.
+- `tools/health.ps1` - the whole chain in one command, read out of the bridge's own status
+  registers: process, server reachable, HMI attached, telemetry age, game, host statistics.
+  Addresses come from the config, so regenerating the map does not break it.
 - `tools/code-map.py` - outline a C# file, or `--grep` for where a member is declared.
   Reading a 500-line file to find one method was the most repeated waste here.
 
