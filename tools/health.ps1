@@ -160,8 +160,16 @@ if ($null -ne $game) {
         0 { 'none' } 1 { 'FS25' } 2 { 'Forza Horizon 6' } 3 { 'BeamNG' } 255 { 'other' }
         default { "code $([int]$game)" }
     }
-    Say 'game' $name $(if ($game -gt 0) { 'running' } else { 'not running' }) `
-        $(if ($game -gt 0) { 'Green' } else { 'DarkGray' })
+    # The block holds last values, so a game code outlives the telemetry that set it. Reporting
+    # "FS25 running" next to "telemetry never" is exactly the misreading that wastes an hour.
+    $telemetryDead = ($null -ne $age) -and ($age -ge 65535)
+    if ($game -gt 0 -and $telemetryDead) {
+        Say 'game' $name 'STALE - held from the last session' 'Yellow'
+    }
+    else {
+        Say 'game' $name $(if ($game -gt 0) { 'running' } else { 'not running' }) `
+            $(if ($game -gt 0) { 'Green' } else { 'DarkGray' })
+    }
 }
 
 Write-Host ""
