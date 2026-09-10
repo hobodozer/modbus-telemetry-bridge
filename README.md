@@ -11,8 +11,8 @@ PLC #1 (Modbus server) ─┐                          ┌─► Modbus TCP SERV
 PLC #2 (Modbus server) ─┼─► Modbus CLIENT ──┐      │     ├─ HMI #1  (unit id 1, map A)
 PLC #n ...             ─┘   (poll / write)  │      │     └─ HMI #2  (unit id 2, map B)
                                             ▼      │
-SimHub  (phase 2) ───────────────────────► TAG BUS ┼─► vJoy feeder (phase 2)
-PC sensors (phase 3) ─────────────────────►        └─► GUI monitor, force/override, logging
+SimHub telemetry ───────────────────────► TAG BUS ┼─► vJoy feeder (buttons/axes/hats)
+Host statistics ─────────────────────────►        └─► GUI monitor, force/override, logging
 ```
 
 Every source publishes named tags carrying a value, a quality and a timestamp. Every sink is just a
@@ -26,18 +26,24 @@ HMIs and a vJoy axis at once, and an HMI's on-screen button becomes an input eve
 | Phase | Scope | State |
 | --- | --- | --- |
 | 1 | Tag bus, Modbus client + multi-client server, config, GUI, simulator | **Complete** |
-| 2a | vJoy feeder — buttons, axes, hats | **Complete**, tested against the real driver |
-| 2b | SimHub plugin and telemetry ingest | **Bridge side complete and tested**; plugin builds against the real SimHub assemblies but has not yet run inside SimHub |
+| 2a | vJoy feeder - buttons, axes, hats | **Complete**, verified against the real driver |
+| 2b | SimHub plugin and telemetry ingest | **Complete**, verified running inside SimHub |
 | 2c | Keyboard / macro output, vJoy shift layers | Not started |
-| 3 | Network scanner, derived-tag expressions, CSV record/replay, PC sensors | Not started |
+| 3 | Host statistics (CPU/RAM/disk/network) | **Complete**; GPU not collected |
+| 3 | Network scanner, derived-tag expressions, CSV record/replay | Not started |
 
-Everything marked complete is verified by the automated suites described under **Testing**.
+Everything marked complete is covered by the automated suites described under **Testing**, and the
+whole chain has been run against real hardware: a Siemens ET 200SP polled over Modbus TCP, a Weintek
+HMI reading the server, a vJoy device fed from PLC contacts, and SimHub streaming Farming Simulator
+25 telemetry - all at once.
 
-**Not yet verified against real hardware or apps:** the Siemens ET 200SP and the HMI (not present on
-the development machine), and the SimHub plugin running inside SimHub. The bridge half of the SimHub
-link is fully tested against a simulated plugin that compiles the same shared protocol file the real
-plugin does, so a wire-format mistake would fail the build — but "the plugin loads and streams
-inside SimHub" is still an untested claim.
+**Verified on the wire, not just in tests:** a 10 ms poll interval measured with a packet capture
+(~194 requests/second for two read groups), the HMI's requests answered with zero exception
+responses, and register contents decoded back independently.
+
+**Known gaps** are listed plainly in `HANDOFF.md` rather than glossed here. The notable ones: a few
+status registers have no source and read zero, GPU utilisation is not collected, and the
+vehicle-component array is mapped for 16 of the 100 slots the HMI reserves.
 
 ---
 
@@ -145,8 +151,17 @@ For an ET 200SP CPU (1510SP / 1512SP) running the `MB_SERVER` instruction:
   sets a floor under the round trip. If the poll-cycle readout is fine but round trip is high, look
   at the PLC's OB cycle rather than the network.
 
-> These notes are from the Siemens documentation for `MB_SERVER`. Confirm against the manual for
-> your exact firmware before committing a design — I have not tested against your hardware.
+> These notes started as Siemens documentation and have since been confirmed against a real
+> ET 200SP (CPU 1512SP-1 PN, firmware V2.9) running `MB_SERVER` 5.3. The single-connection limit in
+> particular is real: while the bridge is polling, anything else aimed at the PLC is refused
+> outright. Confirm against the manual for your own firmware before committing a design.
+
+**A detail worth knowing:** `MB_SERVER` maps the function codes to *different memory areas*, not
+all to one data block. FC 3/6/16 reach the DB passed as `MB_HOLD_REG`, FC 1/5/15 reach the output
+process image, and FC 2 and FC 4 both read the *input* process image - FC 4 as words. So a read of
+holding register 0 and input register 0 legitimately return different values, and the analog module
+appears in the discrete-input bit space too. Whatever byte the modules start at is what the Modbus
+address maps to, so an unused first input byte means the inputs do not begin at address 0.
 
 ---
 
@@ -247,7 +262,17 @@ smaller than this, to reject a noisy analog input) and `invert`.
 
 ### Hats
 
-The tag value is the hat angle in degrees; a negative value centres it.
+Two ways to drive one, because an arcade hat is not wired like a gamepad's:
+
+| `source` | Meaning |
+| --- | --- |
+| `Angle` | One tag holds the hat angle in degrees; a negative value centres it. |
+| `Contacts` | Four separate tags - up, right, down, left - as a real stick is actually wired. Opposing contacts cancel to centre, the way a physical gate makes them. |
+
+`kind` must match the hardware. vJoy exposes **continuous** and **discrete** hats as separate pools,
+and a device configured for one has none of the other, so a mismatch silently does nothing - the
+dashboard warns when it happens. Continuous hats get eight-way resolution including diagonals;
+discrete hats have only four positions, so diagonals round to the nearest of N/E/S/W.
 
 ### Safety
 
@@ -269,6 +294,70 @@ control. **Button and axis counts are set in vJoyConf, not here**: if you need 6
 axes, configure the vJoy device for that and restart the bridge.
 
 ---
+
+## Wiring a panel without decoding addresses
+
+A 60-button panel is tedious to map by hand, and Modbus offers no discovery - a client is told the
+address map by configuration and can never ask for one. So the bridge identifies inputs by watching
+which tag moves.
+
+**vJoy tab -> Learn...** Press a control on the panel. The dialog shows which tag just changed, you
+give it a name, and choose what it drives: a vJoy button (momentary, toggle or pulse), one direction
+of a hat, an axis, or nothing at all if you only want it named. Renaming carries every reference
+with it - vJoy mappings, HMI server blocks, telemetry feedback - so a relearned button keeps its
+number and nothing silently unhooks.
+
+It watches only points the bridge actually polls. Without that filter streaming telemetry would win
+every race, since SimHub moves hundreds of values a second. Analog inputs are excluded by default
+for the same reason and have their own movement threshold when you enable them.
+
+Addresses then appear in exactly one place - the read group - and never downstream. Name a contact
+once and refer to it by name everywhere else.
+
+## Testing outputs
+
+**Devices tab -> Test outputs...** lists every point in every write group with On, Off and Pulse
+buttons, plus a **Sweep** that walks them one at a time so you can watch or listen for which relay
+is which.
+
+It works by forcing the tag the write group already sends, rather than opening its own connection -
+which matters, because a Siemens `MB_SERVER` instance serves exactly one TCP connection and the
+engine owns it. Everything is released when the window closes; leaving an output forced with nothing
+on screen explaining why would be a genuine hazard.
+
+## Host statistics
+
+Independent of any game, so an HMI shows something with nothing running. Enable `pcStats` and the
+bridge publishes CPU load, memory used/total/percent, system-drive usage, network throughput,
+process count, logical CPU count and its own uptime as ordinary tags - map them like any others.
+
+Everything comes from the BCL or two kernel32 calls, so the published executable keeps its
+no-third-party-dependency property. GPU load is the exception and is not collected: it needs
+performance counters, which would mean a package.
+
+## Command-line tools
+
+```powershell
+.
+ig.ps1 status                  # what is running, plus the last few log lines
+.
+ig.ps1 build                   # stop the app, build, restart it
+.
+ig.ps1 test                    # full build + smoke test + UI self-test
+.
+ig.ps1 read 200 67             # read holding registers, non-zero only
+.
+ig.ps1 read 144 16 string      # decode a text field
+.
+ig.ps1 capture 8               # what a connected HMI actually polls, via tshark
+```
+
+`tools/modbus-read.ps1` is the underlying client and takes `-Target`, `-Area`, `-Type` and
+`-WriteValue` for one-off pokes at any device. `tools/make-hmi-map.py` generates a server map and
+its matching SimHub subscriptions from a spec, which is how the 2000-register HMI map is
+maintained. `tools/simhub-catalog` dumps SimHub's live property list so subscriptions can be
+written from fact rather than guesswork, and `tools/tia/` reads a Siemens TIA Portal project
+through the Openness API to get hardware and addressing straight from the engineering data.
 
 ## SimHub telemetry
 
@@ -344,7 +433,12 @@ src/ModbusBridge.App/         WPF desktop app + tray icon
 plugin/                       SimHub plugin (net48, outside the solution)
 shared/TelemetryProtocol.cs   Wire format, compiled into BOTH the bridge and the plugin
 tests/ModbusBridge.SmokeTest/ End-to-end test with no PLC hardware
+tools/modbus-read.ps1         Read or write any Modbus TCP device from the command line
+tools/make-hmi-map.py         Generate a server register map and its SimHub subscriptions
+tools/simhub-catalog/         Dump the SimHub property catalogue to text
+tools/tia/                    Read a Siemens TIA Portal project through the Openness API
 build.ps1                     Build, test, publish
+rig.ps1                       Task runner: status, build, test, read, capture, log
 install-simhub-plugin.ps1     Build and install the SimHub plugin
 ```
 
@@ -373,6 +467,11 @@ clients, then checks the whole chain: polling, NO/NC inversion, scaling, serving
 back on tags, multiple concurrent clients, exception responses, codec round-trips across every
 word/byte-order combination, and that a 10 ms poll interval is actually held.
 
+> The poll-interval check is the one assertion not to trust blindly. Timer resolution has been
+> per-process since Windows 10 2004, and the background test process does not get what the windowed
+> app gets, so it can report ~15.6 ms cycles while the running bridge holds 10.3 ms. Measure timing
+> with a packet capture before concluding anything has regressed.
+
 **The vJoy checks drive the real driver and read the result back through a completely separate code
 path** — Windows' own `winmm` joystick API. That matters: if the `JOYSTICK_POSITION_V2` struct
 layout were wrong, writing would still "succeed" and only an independent readback would notice. The
@@ -390,11 +489,14 @@ The UI self-test (`--selftest`) walks every tab and fails the build on any WPF b
 
 ## Not yet built
 
-- **SimHub plugin** — a net48 DLL dropped into SimHub's plugin folder, streaming selected properties
-  to the bridge, with a property browser in this GUI, plus contacts fed back as SimHub input
-  triggers.
-- **Keyboard / macro output** — for games that ignore joystick input for certain functions.
+- **Keyboard / macro output** - for games that ignore joystick input for certain functions.
 - **Shift layers** for vJoy buttons, so one physical button can send different vJoy buttons
   depending on a modifier contact.
-- Network scanner, derived-tag expression engine, CSV record/replay, PC hardware sensors,
-  per-game profile switching, run-as-service.
+- **Derived-tag expressions.** Values that are a function of other tags currently need code. One
+  such value (fuel percent, from level and capacity) is hard-coded in the engine as a stopgap and
+  is marked as such.
+- **GPU utilisation** - the host statistics collector uses only the BCL and two kernel32 calls to
+  keep the published executable dependency-free, and GPU load needs performance counters.
+- **Chunked telemetry schema.** The property catalogue is chunked across datagrams; the schema is
+  not, which caps a subscription at roughly 900 properties.
+- Network scanner, CSV record/replay, per-game profile switching, run-as-service.
