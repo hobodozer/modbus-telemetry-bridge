@@ -505,6 +505,19 @@ internal static class Program
             Tag = "vjoy.testLayered", Button = 6, Mode = VJoyButtonMode.Momentary, Layer = "shift"
         });
 
+        // Per-game profiles: the same contact means different things depending on what is running.
+        vjoyDevice.ProfileTag = "vjoy.testGame";
+        vjoyDevice.Profiles.Add(new VJoyProfile { Name = "farm", Games = { "FarmingSimulator*" } });
+        vjoyDevice.Profiles.Add(new VJoyProfile { Name = "race", Games = { "*Racing*", "iRacing" } });
+        vjoyDevice.Buttons.Add(new VJoyButtonMapping
+        {
+            Tag = "vjoy.testProfiled", Button = 7, Mode = VJoyButtonMode.Momentary, Profile = "farm"
+        });
+        vjoyDevice.Buttons.Add(new VJoyButtonMapping
+        {
+            Tag = "vjoy.testProfiled", Button = 8, Mode = VJoyButtonMode.Momentary, Profile = "race"
+        });
+
         vjoyDevice.Axes.Add(new VJoyAxisMapping
         {
             Tag = "vjoy.testAxis", Axis = VJoyAxis.X, InputMin = 0, InputMax = 100

@@ -91,6 +91,9 @@ public sealed class VJoyStatistics
 
     /// <summary>Shift layer currently held, or empty for the base layer.</summary>
     public string ActiveLayer = "";
+
+    /// <summary>Profile currently selected, or empty when none matches.</summary>
+    public string ActiveProfile = "";
     public bool Released;
 
     public void Reset()
@@ -111,6 +114,7 @@ public sealed class VJoyFeeder : IAsyncDisposable
     private readonly List<AxisRuntime> _axes = new();
     private readonly List<PovRuntime> _povs = new();
     private readonly List<LayerRuntime> _layers = new();
+    private TagEntry? _profileSelector;
 
     /// <summary>Layer/tag pairs, so a base mapping can tell when a layer overrides the same tag.</summary>
     private readonly HashSet<(string Layer, string Tag)> _overrides = new();
@@ -147,6 +151,9 @@ public sealed class VJoyFeeder : IAsyncDisposable
             if (!string.IsNullOrWhiteSpace(mapping.Layer))
                 _overrides.Add((mapping.Layer.ToLowerInvariant(), mapping.Tag.ToLowerInvariant()));
         }
+
+        if (!string.IsNullOrWhiteSpace(_config.ProfileTag))
+            _profileSelector = _bus.GetOrAdd(_config.ProfileTag);
 
         foreach (var layer in _config.Layers.Where(l => l.Enabled
                                                        && !string.IsNullOrWhiteSpace(l.Name)
@@ -205,6 +212,15 @@ public sealed class VJoyFeeder : IAsyncDisposable
     /// always does; a base mapping does unless the active layer redefines the same tag - so a
     /// panel is mapped once and a layer only lists what changes.
     /// </summary>
+    /// <summary>
+    /// A mapping with no profile is always active; one with a profile applies only while that
+    /// profile is selected. Kept separate from layers so the two compose - a shift layer can be
+    /// scoped to a game.
+    /// </summary>
+    private static bool InProfile(string mappingProfile, string activeProfile) =>
+        string.IsNullOrWhiteSpace(mappingProfile)
+        || string.Equals(mappingProfile, activeProfile, StringComparison.OrdinalIgnoreCase);
+
     private bool IsActiveIn(ButtonRuntime button, string activeLayer)
     {
         var layer = button.Config.Layer;
@@ -231,6 +247,7 @@ public sealed class VJoyFeeder : IAsyncDisposable
 
         foreach (var axis in _axes)
         {
+
             if (!capabilities.HasAxis(axis.Config.Axis))
                 warnings.Add($"Device {capabilities.DeviceId} has no {axis.Config.Axis} axis, " +
                              $"but '{axis.Config.Tag}' is mapped to it. Enable the axis in vJoyConf.");
@@ -359,13 +376,28 @@ public sealed class VJoyFeeder : IAsyncDisposable
         }
         Statistics.ActiveLayer = activeLayer;
 
+        // First matching profile wins, so ordering them most specific first is meaningful.
+        var selector = _profileSelector?.Value.Text ?? "";
+        var activeProfile = "";
+        if (selector.Length > 0)
+        {
+            foreach (var profile in _config.Profiles)
+            {
+                if (!profile.Enabled || string.IsNullOrWhiteSpace(profile.Name)) continue;
+                if (!profile.Games.Any(g => TagRecorder.Matches(g, selector))) continue;
+                activeProfile = profile.Name;
+                break;
+            }
+        }
+        Statistics.ActiveProfile = activeProfile;
+
         foreach (var button in _buttons)
         {
             var value = button.Tag.Value;
             var raw = value.Number >= button.Config.Threshold;
             var input = raw ^ button.Config.Invert;
 
-            if (!IsActiveIn(button, activeLayer))
+            if (!InProfile(button.Config.Profile, activeProfile) || !IsActiveIn(button, activeLayer))
             {
                 // Release rather than leave it stuck, and keep edge tracking current so returning
                 // to this layer does not read as a fresh press. A toggle keeps its latch.
@@ -411,6 +443,20 @@ public sealed class VJoyFeeder : IAsyncDisposable
 
         foreach (var axis in _axes)
         {
+            if (!InProfile(axis.Config.Profile, activeProfile))
+            {
+                // Centre rather than freeze: a throttle stuck at its last value is worse than
+                // one that returns to neutral when its profile stops applying.
+                var centre = device.ScaleToAxis(axis.Config.Axis, 0.5);
+                if (device.GetAxis(axis.Config.Axis) != centre)
+                {
+                    device.SetAxis(axis.Config.Axis, centre);
+                    axis.LastNormalised = double.NaN;
+                    changed = true;
+                }
+                continue;
+            }
+
             var normalised = Normalise(axis.Config, axis.Tag.Value.Number);
 
             // Deadband is expressed as a fraction of full travel.
@@ -429,6 +475,18 @@ public sealed class VJoyFeeder : IAsyncDisposable
 
         foreach (var pov in _povs)
         {
+            if (!InProfile(pov.Config.Profile, activeProfile))
+            {
+                if (pov.LastRaw != 0xFFFFFFFF)
+                {
+                    if (pov.Config.Kind == VJoyPovKind.Discrete) device.SetDiscretePov(pov.Config.Pov, null);
+                    else device.SetContinuousPov(pov.Config.Pov, null);
+                    pov.LastRaw = 0xFFFFFFFF;
+                    changed = true;
+                }
+                continue;
+            }
+
             // Resolve to an angle in degrees (or null for centred) regardless of source, then let
             // the hat's own kind decide how that lands in the report.
             double? degrees;

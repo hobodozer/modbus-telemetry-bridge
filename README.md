@@ -291,6 +291,32 @@ When several modifiers are held at once, the highest `priority` wins, so overlap
 predictably instead of by declaration order. Switching layers while a button is still held releases
 the outgoing button rather than leaving it stuck - the case worth testing, and the smoke test does.
 
+### Per-game profiles
+
+The same panel meaning different things depending on what is running, without remapping by hand.
+
+```jsonc
+"profileTag": "bridge.simhubGame",     // what profiles are matched against
+"profiles": [
+  { "name": "farm", "games": ["FarmingSimulator*"] },
+  { "name": "race", "games": ["*Racing*", "iRacing"] }
+]
+```
+
+Then give a mapping a `profile`. Mappings with no profile are always active, so the common parts of
+a panel are declared once and a profile only lists what differs. The first profile whose pattern
+matches wins, so order them most specific first.
+
+`profileTag` is just a tag, so the selector does not have to be the game. Point it at a PLC input
+and a physical rotary switch picks the profile instead.
+
+Profiles apply to axes and hats as well as buttons. An axis outside the active profile is **centred
+rather than frozen** - a throttle stuck at its last value is worse than one that returns to neutral.
+Switching profile while a button is held releases the outgoing button rather than leaving it stuck,
+the same as with shift layers, and the smoke test covers it.
+
+Profiles and layers compose: a mapping can carry both, so a shift layer can be scoped to one game.
+
 ### Safety
 
 `releaseOnBadQuality` (on by default) releases every control and centres every axis if all the
@@ -568,4 +594,4 @@ The UI self-test (`--selftest`) walks every tab and fails the build on any WPF b
   keep the published executable dependency-free, and GPU load needs performance counters.
 - **Chunked telemetry schema.** The property catalogue is chunked across datagrams; the schema is
   not, which caps a subscription at roughly 900 properties.
-- Per-game profile switching, run-as-service.
+- Run-as-service.

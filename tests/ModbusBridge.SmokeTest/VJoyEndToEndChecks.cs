@@ -182,6 +182,37 @@ internal static class VJoyEndToEndChecks
             tag.DemoteQuality(ModbusBridge.Core.Data.TagQuality.Bad);
         }
 
+        // ---- Per-game profiles ----
+        var profiled = engine.Tags.GetOrAdd("vjoy.testProfiled");
+        var game = engine.Tags.GetOrAdd("vjoy.testGame");
+        profiled.Force(TagValue.Good(true));
+        game.Force(TagValue.GoodText(""));
+        await Task.Delay(150);
+        check(!IsPressed(reader.Index, 7) && !IsPressed(reader.Index, 8),
+              "no profile selected: neither profiled button fires");
+
+        game.Force(TagValue.GoodText("FarmingSimulator25"));
+        await Task.Delay(150);
+        check(IsPressed(reader.Index, 7), "farm profile: the contact drives button 7");
+        check(!IsPressed(reader.Index, 8), "farm profile: the racing button stays clear");
+
+        // Switching profile with the contact held is the same hazard as switching layers.
+        game.Force(TagValue.GoodText("iRacing"));
+        await Task.Delay(150);
+        check(IsPressed(reader.Index, 8), "race profile: the same contact now drives button 8");
+        check(!IsPressed(reader.Index, 7), "race profile: button 7 released, not left stuck");
+
+        game.Force(TagValue.GoodText("Something Else"));
+        await Task.Delay(150);
+        check(!IsPressed(reader.Index, 7) && !IsPressed(reader.Index, 8),
+              "an unmatched game clears every profiled button");
+
+        foreach (var tag in new[] { profiled, game })
+        {
+            tag.Unforce();
+            tag.DemoteQuality(ModbusBridge.Core.Data.TagQuality.Bad);
+        }
+
         // ---- Hat driven by four contacts ----
         // Read back through winmm's own dwPOV rather than the report struct, for the same reason
         // the buttons are: a wrong field or a wrong pool would still "succeed" on write.
