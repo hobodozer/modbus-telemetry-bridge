@@ -26,7 +26,9 @@ Start-Process .\src\ModbusBridge.App\bin\Release\net8.0-windows\ModbusBridge.exe
 pwsh -File .\tools\modbus-read.ps1 -Address 200 -Count 67 -NonZero    # read any register
 pwsh -File .\tools\modbus-read.ps1 -Address 144 -Count 16 -Type string
 python tools\make-hmi-map.py rig\config\bridge.json --components 16   # regenerate the HMI map
+python tools\exob-map.py project.exob --types NE,AE --csv map.csv     # HMI address map from a compiled .exob
 dotnet run --project tools\simhub-catalog                             # dump SimHub properties (bridge must be STOPPED)
+dotnet run --project tools\store-probe                                # bench + invariant check for ServerDataStore
 ```
 
 The app locks its own exe - **stop `ModbusBridge` before building** or the copy step fails.
@@ -45,6 +47,23 @@ The app locks its own exe - **stop `ModbusBridge` before building** or the copy 
   `C:\Program Files (x86)\SimHub\Logs\SimHub.txt` - check it whenever frames stop.
 - **The PLC's `MB_SERVER` serves exactly ONE TCP connection.** While the bridge polls, anything else
   aimed at 192.0.2.10 gets "connection refused". Read the bridge's server instead.
+- **A client write must never reach a read-only register.** `ServerDataStore` overlays an incoming
+  write onto the block image, and it once did so *before* checking writability - so a refused
+  write still rewrote every read-only point it covered, and they reported the client's bytes
+  until their tags next moved. Blocks now carry a writable-coverage mask (per *bit* for register
+  areas, so a packed bit cannot clobber a read-only neighbour in the same word). If you touch
+  `ApplyWrite`, run `dotnet run --project tools\store-probe`.
+- **Anything per-request must not be done per-register.** `Refresh()` was called inside the
+  address loop, making a read O(count x points): 1.9 ms for a 125-register read of a 317-point
+  block. Only `holdLastValue` with no stale timeout hid it, and that is the one combination the
+  live config uses - `DefaultConfig` ships `Failsafe`/2000 and did not. The probe prints a curve;
+  read cost must stay flat as the map grows.
+- **A tag's `Version` bumps on every accepted write, including a republish of an unchanged
+  value.** The engine republishes `bridge.*` and the derived tags every housekeeping pass, so
+  "has this changed?" cannot be answered by comparing versions. `TagRecorder.onChangeOnly` did
+  exactly that and wrote a row per interval. Do not "fix" this in `TagEntry.Set`: an unchanged
+  republish must still refresh the timestamp, or `SweepStale` demotes a live input that happens
+  to sit at zero.
 - **The smoke test's 10 ms timing check is unreliable and has been wrong twice.** Timer resolution
   is per-process since Windows 10 2004, and the background test process does not get what the
   windowed app gets, so it reports ~15.6 ms cycles while the real bridge holds 10.3 ms. **Measure
@@ -55,6 +74,44 @@ The app locks its own exe - **stop `ModbusBridge` before building** or the copy 
   and `RD` is an alias for `Remove-Item`, so do not name a function that.
 - WinForms + WPF are both referenced: `Color`, `Control`, `ToolTip`, `MenuItem` are ambiguous.
   Fully qualify `System.Windows.*` or use the aliases in `GlobalUsings.cs`.
+
+## Keep the documentation current in the same commit
+
+Not as a chore - as the thing that stops the next session paying to rediscover what this one
+already knows. Stale docs are worse than none, because they are believed.
+
+Every one of these was found rotten and had to be re-derived from the code:
+
+- `README.md` said keyboard output, shift layers, the network scanner, derived tags and CSV
+  record/replay were "Not started". All five were built and shipping.
+- `README.md` said GPU load "is not collected" in four separate places. `Inputs/GpuCounter.cs`
+  had been collecting it through PDH for a day.
+- `FINDINGS.md` section 15 said "the catalog is chunked, the schema is NOT" and quoted a ceiling
+  of ~66 components. The schema had been chunked and the ceiling removed.
+- Nine copy-pasteable commands across three files were silently corrupted by interpreted
+  backslash escapes and could not have worked.
+
+So, when you finish a change:
+
+1. **`HANDOFF.md`** - status table, the tools list, and the numbered gaps. If you closed a gap,
+   delete it or say what remains unverified; do not leave it reading as open.
+2. **`README.md`** - the Status table, the project-layout tree, and "Not yet built". A new file
+   under `tools/` or a new `src/` subdirectory belongs in the tree.
+3. **`FINDINGS.md`** - only for things that cost real time to learn, and correct any section your
+   change made untrue rather than appending a contradiction.
+4. **`CLAUDE.md`** - the command list and the traps table. A trap earns its place by having
+   already cost hours.
+
+Do it in the commit that makes the change true, not in a documentation pass afterwards - the pass
+afterwards is the one that never happens.
+
+**Windows paths in documentation are a live hazard.** A tool call writing `rig\config\bridge.json`
+through a shell heredoc can have the `\b` interpreted as a backspace, and the damage is invisible in
+a rendered view. After editing any doc containing a Windows path, check it:
+
+```powershell
+git diff | Select-String -Pattern "[\x00-\x08\x0b\x0c\x0e-\x1f]"   # must print nothing
+```
 
 ## Working style that fits this project
 

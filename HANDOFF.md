@@ -1,7 +1,8 @@
 # Handoff - state as of 2026-09-10
 
-Read `FINDINGS.md` first - especially sections 13-16, which are new and cover the traps that
-cost the most time in the session that produced this. This file is only the status summary; `README.md` is user docs.
+Read `FINDINGS.md` first - especially sections 13-17. Section 17 is the newest and records the
+six bugs a second review pass found in code the first pass had already signed off, sorted by
+the class of mistake rather than by incident. This file is only the status summary; `README.md` is user docs.
 
 ## The rig, as it actually runs now
 
@@ -48,6 +49,11 @@ new hat checks, after every change below.
 - `tools/make-hmi-map.py` generates the whole HMI register map (316 points, 287 subscriptions).
 - `tools/simhub-catalog` dumps the live SimHub property catalog to text.
 - `tools/tia/` - TIA Openness inspector/exporter; see its README.
+- `tools/exob-map.py` - pulls the address map straight out of a compiled Weintek `.exob`.
+  Reproduces the verified 1517-object map; see FINDINGS section 16.
+- `tools/store-probe` - bench and invariant check for `ServerDataStore`. Sweeps map size and
+  stale policy and prints a curve, so a cost that scales with the map shows up instead of
+  passing. Run it after touching the server read or write path.
 
 ## Known gaps - none of these are mysteries, they are unfinished work
 
@@ -55,8 +61,10 @@ new hat checks, after every change below.
    expression over other tags. Fuel percent, the schema versions and the status-flag bitmask all
    come from there; the hard-coded stopgap in the engine is gone.
 2. Registers 1, 141, 200, 201, 240, 241 are mapped but nothing computes them; they read 0.
-3. Register 7 (GPU %) - the collector does not gather it. Needs PDH `GPU Engine` counters.
-4. Components are mapped to 16 of the map's 100. The schema is chunked now, so the old ceiling is
+3. Register 7 (GPU %) is collected now, through PDH `GPU Engine` counters in
+   `Inputs/GpuCounter.cs`. **Not verified under load** - it has only been seen idle.
+4. Components are mapped to 16 of the map's 100. The schema is chunked (wire version 2, and
+   version 1 plugins still work), so the old ceiling is
    gone - raise it with `python tools\make-hmi-map.py rig\config\bridge.json --components 100`.
    **The installed plugin still speaks wire version 1**, so until it is reinstalled (needs
    elevation and SimHub closed) subscriptions stay capped at one datagram. The bridge logs a
@@ -74,4 +82,9 @@ new hat checks, after every change below.
 - String points need `length` (registers), not `size`; `Size` is computed from it.
 - The PLC's `MB_SERVER` serves **exactly one TCP connection**. While the bridge is polling, nothing
   else can reach 192.0.2.10 - probes get "connection refused".
-- The bridge's server binds `0.0.0.0:502` with no allow-list.
+- The bridge's server binds `0.0.0.0:502` with no allow-list. Since a client write can no
+  longer reach a read-only register this is less alarming than it was, but it is still open.
+- `BridgeConfig.Validate()` covers Clients, Servers, Telemetry and `VJoy.Devices` only. The
+  `derived`, `keyboard`, `recording`, `replay` and `pcStats` sections are **never validated**.
+  They degrade gracefully at runtime - a bad expression or key spec is logged and skipped - so
+  this is a gap, not a bug, but a typo in one of them is only discovered by reading the log.

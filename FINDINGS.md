@@ -431,9 +431,15 @@ Fixed by raising `MaxDatagram` to 60000 (loopback UDP allows ~65507 and the kern
 and adding a bounds guard that truncates instead of throwing. Socket receive buffers on both ends
 were raised to match, since a schema immediately followed by a data frame can overrun the default.
 
-**Remaining limit:** the catalog is chunked, the schema is NOT. Property names average ~62 bytes
-for components, so the schema caps out around **66 vehicle components**. The HMI map reserves 100.
-Going beyond needs the schema chunked the way the catalog already is.
+**Resolved 2026-09-10:** the schema is chunked now too, and `MaxDatagram` went from 8192 to 60000.
+`BuildSchema` returns a list of datagrams and the ingest side reassembles by `(schemaId, chunk
+index, chunk count)`, applying nothing until every chunk has arrived - a data frame decoded
+against half a column list is worse than no frame. Wire version is 2, and version 1 plugins are
+still accepted: the bridge logs which version the plugin speaks and keeps working.
+
+The old ceiling of ~66 vehicle components is therefore gone, but **the installed plugin still
+speaks version 1** until it is reinstalled, so subscriptions stay capped at one datagram in
+practice. Reinstalling needs elevation and SimHub closed.
 
 ---
 
@@ -444,8 +450,76 @@ each object record - identically for `NE` (fixed 235 bytes) and `AE` (fixed 114 
 scanning every byte position for the one whose values matched known pairs, then confirmed at
 1517/1517 against `reference/HMI_OBJECT_MAP.csv`.
 
+`tools/exob-map.py` is that decoder. It walks the `WINDOW` section (12-byte header, then 20-byte
+`WI` window headers, then `type(2) + size(2) + payload` records, total length `size + 2`) and
+pulls the address out of each record. Run against the reference project it reproduces the type
+counts exactly - `NE=1516`, `AE=42`, `FK=1404` - and reports the same 1517 addressed objects:
+
+    python tools/exob-map.py project.exob --types NE,AE --csv hmi-map.csv
+
+It stops rather than guessing if the record chain loses sync, because a desynchronised walk
+invents plausible-looking addresses.
+
 That CSV is therefore **verified**, not merely generated. `reference/REGISTER_MAP.csv` is a
 ChatGPT-written semantic document and is NOT verified - treat it as a specification, not truth.
 Objects whose address is >= 8000 are bound to the HMI's own local LW registers, not to Modbus;
 exclude them before comparing counts.
 
+---
+
+## 17. Bug classes that survived the first hunt (2026-09-10)
+
+Six bugs were found in a second pass over code that had already been reviewed once. They are
+recorded as *classes* rather than incidents, because the first hunt looked for wrong logic and
+these were all something else.
+
+**Mutation before validation.** `ServerDataStore.ApplyWrite` overlaid the client's data onto the
+block image and only then decided which points were writable. A write that was refused with
+exception 02 had already corrupted every read-only point it covered. The live HMI block is 317
+read-only points in one span, so a single stray FC16 could blank the panel - and slow-moving
+values would stay wrong while fast ones self-healed, which reads as an addressing fault.
+Look for: any handler that writes to shared state before its guard clause.
+
+**Right work, wrong loop.** `Refresh()` re-encodes every point in a block. It was called once per
+*register* instead of once per *request*, so a read was O(count x points). Measured on a
+317-point block, a 125-register read: 1.895 ms, against 0.045 ms after hoisting.
+Look for: a per-collection operation inside a per-element loop. The tell is cost that tracks the
+size of the map rather than the size of the request.
+
+**The only configuration that hides it is the one you run.** The bug above is invisible under
+`holdLastValue` with no stale timeout, because the version check short-circuits. That is what
+`rig/config/bridge.json` uses. `DefaultConfig` ships `Failsafe`/2000, which does not - so every
+fresh install had it and the live rig did not. Benchmark the shipped defaults, not your config.
+
+**Cleanup on the path that cannot accumulate.** Incomplete telemetry schemas were evicted only
+after a *successful* reassembly. UDP drops chunks; a schema missing one never completes, so the
+eviction never ran on the only path that leaks. Look for: a bounds check inside the success
+branch.
+
+**A guard on one branch of two.** `KeyMode.Tap` checked `HasSeenInput` before the edge branch but
+not before the repeat branch, and `NextRepeatTicks` starts at zero - so a tag already true at
+startup fired a keystroke immediately, which is exactly what the guard existed to prevent.
+
+**Trusting a length field over the bytes that arrived.** `ReadBitsAsync`/`ReadRegistersAsync`
+checked the response's declared byte count but never against the actual PDU length, so a device
+declaring 250 bytes and sending three would be indexed past the end.
+
+### The one that must not be "fixed" at the source
+
+`TagEntry.Version` bumps on *every* accepted write, including a republish of a value the tag
+already held. `TagRecorder.onChangeOnly` compared versions and therefore wrote a row per interval
+forever, because the engine republishes `bridge.*` and the derived tags every housekeeping pass.
+Measured: 52 rows for a constant, now 1.
+
+The obvious fix - make `Set` a no-op when the value is unchanged - is wrong. An unchanged
+republish must still refresh `TimestampUtc`, or `SweepStale` demotes a perfectly live PLC input
+that happens to sit at zero. The recorder formats the row and compares *that* instead, which is
+also exactly the question it needs answered.
+
+### How they were found
+
+Not by reading. `tools/store-probe` sweeps map sizes and stale policies and prints a curve, which
+is what made the O(count x points) cost obvious; the write corruption came from asserting an
+invariant ("a refused write changes nothing") that no existing test stated. Both are now in the
+smoke test, and the probe is kept because a benchmark that only ever runs at one size proves
+nothing about scaling.

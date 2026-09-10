@@ -28,9 +28,10 @@ HMIs and a vJoy axis at once, and an HMI's on-screen button becomes an input eve
 | 1 | Tag bus, Modbus client + multi-client server, config, GUI, simulator | **Complete** |
 | 2a | vJoy feeder - buttons, axes, hats | **Complete**, verified against the real driver |
 | 2b | SimHub plugin and telemetry ingest | **Complete**, verified running inside SimHub |
-| 2c | Keyboard / macro output, vJoy shift layers | Not started |
-| 3 | Host statistics (CPU/RAM/disk/network) | **Complete**; GPU not collected |
-| 3 | Network scanner, derived-tag expressions, CSV record/replay | Not started |
+| 2c | Keyboard / macro output, vJoy shift layers, per-game profiles | **Complete**; keyboard output ships with `dryRun` on and has only been run against a recording sink |
+| 3 | Host statistics - CPU, RAM, disk, network, GPU | **Complete**; GPU reads the Windows "GPU Engine" counters through PDH |
+| 3 | Network scanner, derived-tag expressions, CSV record/replay | **Complete** |
+| 4 | Run as a Windows service | Not started |
 
 Everything marked complete is covered by the automated suites described under **Testing**, and the
 whole chain has been run against real hardware: a Siemens ET 200SP polled over Modbus TCP, a Weintek
@@ -42,8 +43,9 @@ HMI reading the server, a vJoy device fed from PLC contacts, and SimHub streamin
 responses, and register contents decoded back independently.
 
 **Known gaps** are listed plainly in `HANDOFF.md` rather than glossed here. The notable ones: a few
-status registers have no source and read zero, GPU utilisation is not collected, and the
-vehicle-component array is mapped for 16 of the 100 slots the HMI reserves.
+status registers have no source and read zero, the vehicle-component array is mapped for 16 of
+the 100 slots the HMI reserves, and five of the newer configuration sections are never checked
+by config validation.
 
 ---
 
@@ -375,8 +377,10 @@ bridge publishes CPU load, memory used/total/percent, system-drive usage, networ
 process count, logical CPU count and its own uptime as ordinary tags - map them like any others.
 
 Everything comes from the BCL or two kernel32 calls, so the published executable keeps its
-no-third-party-dependency property. GPU load is the exception and is not collected: it needs
-performance counters, which would mean a package.
+no-third-party-dependency property. GPU load is the one that needed more: it comes from the
+Windows "GPU Engine" performance counters, read through `pdh.dll` directly rather than through
+`System.Diagnostics.PerformanceCounter`, which would have meant a NuGet reference. Windows
+reports one counter instance per process per engine, so the collector sums them.
 
 ## Keyboard output
 
@@ -561,9 +565,10 @@ src/ModbusBridge.Core/        Engine, protocol, config - no UI dependencies
   Modbus/                     Modbus TCP client and multi-client server (no third-party stack)
   Engine/                     Device runner (poll/write/watchdog), server data store, BridgeEngine
   Simulation/                 Virtual PLC and waveform generator
-  Diagnostics/                Logging, high-resolution clock
-  Outputs/VJoy/               vJoy interop, device wrapper, feeder
-  Inputs/                     SimHub telemetry ingest
+  Diagnostics/                Logging, high-resolution clock, CSV tag recorder
+  Outputs/VJoy/               vJoy interop, device wrapper, feeder, shift layers, profiles
+  Outputs/Keyboard/           Key spec parser, macro runner, SendInput sink
+  Inputs/                     SimHub telemetry ingest, host statistics, GPU counters, CSV replay
 src/ModbusBridge.App/         WPF desktop app + tray icon
 plugin/                       SimHub plugin (net48, outside the solution)
 shared/TelemetryProtocol.cs   Wire format, compiled into BOTH the bridge and the plugin
@@ -571,6 +576,8 @@ tests/ModbusBridge.SmokeTest/ End-to-end test with no PLC hardware
 tools/modbus-read.ps1         Read or write any Modbus TCP device from the command line
 tools/make-hmi-map.py         Generate a server register map and its SimHub subscriptions
 tools/simhub-catalog/         Dump the SimHub property catalogue to text
+tools/exob-map.py             Extract the address map from a compiled Weintek .exob
+tools/store-probe/            Bench + invariant check for the server data store
 tools/tia/                    Read a Siemens TIA Portal project through the Openness API
 build.ps1                     Build, test, publish
 rig.ps1                       Task runner: status, build, test, read, capture, log
@@ -594,6 +601,7 @@ Supported function codes: 1, 2, 3, 4, 5, 6, 15, 16, 22 (mask write), 23 (read/wr
 
 ```powershell
 dotnet run --project tests\ModbusBridge.SmokeTest    # engine end-to-end, no hardware
+dotnet run --project tools\store-probe               # server data store: scaling + invariants
 .\build.ps1                                          # both suites
 ```
 
@@ -638,6 +646,7 @@ passed, so it is worth running before trusting a push.
 
 ## Not yet built
 
-- **GPU utilisation** - the host statistics collector uses only the BCL and two kernel32 calls to
-  keep the published executable dependency-free, and GPU load needs performance counters.
-- Run-as-service.
+- Run as a Windows service. Needs elevation to install, so it has not been attempted here.
+- Validation for the `derived`, `keyboard`, `recording`, `replay` and `pcStats` configuration
+  sections. They are read and used, and bad entries are logged and skipped at runtime, but a
+  typo in one is not caught when the file is saved.
