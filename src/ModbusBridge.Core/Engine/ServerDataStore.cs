@@ -1,4 +1,4 @@
-using ModbusBridge.Core.Config;
+﻿using ModbusBridge.Core.Config;
 using ModbusBridge.Core.Data;
 using ModbusBridge.Core.Diagnostics;
 using ModbusBridge.Core.Modbus;
@@ -24,6 +24,37 @@ internal sealed class BlockImage
 
     /// <summary>Set when a point in this block is failing under <see cref="StaleBehavior.ModbusException"/>.</summary>
     public bool Failed { get; private set; }
+
+    // Which cells a connecting client is actually allowed to change. A write only overlays these,
+    // so a request that reaches a read-only point cannot alter what the block reports. For register
+    // areas the mask is per bit, because a packed-bit point can share a register with a read-only
+    // one and clobbering the whole word would take the neighbour with it.
+    private ushort[] _writableMask = Array.Empty<ushort>();
+    private bool[] _writableBits = Array.Empty<bool>();
+
+    /// <summary>Computes the writable coverage. Called once, after every point has been added.</summary>
+    public void Seal()
+    {
+        if (IsBitArea)
+        {
+            _writableBits = new bool[Size];
+            foreach (var point in Points.Where(p => p.IsWritable))
+                for (var i = point.WireAddress - WireStart; i < point.WireEnd - WireStart; i++)
+                    if (i >= 0 && i < Size) _writableBits[i] = true;
+            return;
+        }
+
+        _writableMask = new ushort[Size];
+        foreach (var point in Points.Where(p => p.IsWritable))
+        {
+            var mask = point.BitIndex >= 0 && point.BitIndex < 16
+                ? (ushort)(1 << point.BitIndex)
+                : (ushort)0xFFFF;
+
+            for (var i = point.WireAddress - WireStart; i < point.WireEnd - WireStart; i++)
+                if (i >= 0 && i < Size) _writableMask[i] |= mask;
+        }
+    }
 
     public int WireEnd => WireStart + Size;
     public bool Contains(int wireAddress) => wireAddress >= WireStart && wireAddress < WireEnd;
@@ -84,14 +115,22 @@ internal sealed class BlockImage
         var applied = 0;
         var wireEnd = wireStart + (IsBitArea ? bits.Length : registers.Length);
 
-        // Overlay the incoming data onto the image first, so partially-covered multi-register
-        // points and packed bits decode against the correct surrounding words.
+        // Bring the image up to date before overlaying, so a partially-covered multi-register point
+        // decodes against the current surrounding words rather than whatever was last encoded.
+        Refresh();
+
+        // Overlay the incoming data, but only where a writable point actually sits. Anything else
+        // in range - a read-only point, or an unmapped gap inside the block - keeps its own value.
+        // Without this a rejected write still rewrote the image, and every read-only point it
+        // covered reported the client's bytes until its tag happened to change.
         if (IsBitArea)
         {
             for (var i = 0; i < bits.Length; i++)
             {
                 var address = wireStart + i;
-                if (Contains(address)) Bits[address - WireStart] = bits[i];
+                if (!Contains(address)) continue;
+                var offset = address - WireStart;
+                if (_writableBits[offset]) Bits[offset] = bits[i];
             }
         }
         else
@@ -99,7 +138,11 @@ internal sealed class BlockImage
             for (var i = 0; i < registers.Length; i++)
             {
                 var address = wireStart + i;
-                if (Contains(address)) Registers[address - WireStart] = registers[i];
+                if (!Contains(address)) continue;
+                var offset = address - WireStart;
+                var mask = _writableMask[offset];
+                if (mask == 0) continue;
+                Registers[offset] = (ushort)(Registers[offset] & ~mask | registers[i] & mask);
             }
         }
 
@@ -227,6 +270,8 @@ public sealed class ServerDataStore : IModbusDataStore
                 PointCount++;
             }
 
+            image.Seal();
+
             if (!unit.Areas.TryGetValue(block.Area, out var list))
                 unit.Areas[block.Area] = list = new List<BlockImage>();
             list.Add(image);
@@ -257,6 +302,34 @@ public sealed class ServerDataStore : IModbusDataStore
     public byte ReadInputRegisters(byte unitId, ushort start, ushort count, Span<ushort> destination) =>
         ReadRegisters(unitId, ModbusArea.InputRegister, start, count, destination);
 
+    /// <summary>
+    /// Re-encodes every block the request touches, once. This used to happen per register, which
+    /// made a read O(count x points): a stale-sensitive block re-evaluates all of its points on
+    /// every pass, so a 125-register read of a 317-point block did ~40,000 point evaluations and
+    /// as many DateTime.UtcNow calls. Only a block configured with HoldLastValue and no stale
+    /// timeout escaped it, which is why it stayed hidden.
+    /// </summary>
+    private static byte RefreshRange(List<BlockImage> blocks, int start, int end)
+    {
+        for (var i = 0; i < blocks.Count; i++)
+        {
+            var block = blocks[i];
+            if (block.WireStart >= end || block.WireEnd <= start) continue;
+
+            block.Refresh();
+            if (block.Failed) return ModbusExceptionCode.ServerDeviceFailure;
+        }
+        return 0;
+    }
+
+    /// <summary>Linear scan rather than LINQ: this runs once per register on the hot path.</summary>
+    private static BlockImage? Find(List<BlockImage> blocks, int address)
+    {
+        for (var i = 0; i < blocks.Count; i++)
+            if (blocks[i].Contains(address)) return blocks[i];
+        return null;
+    }
+
     private byte ReadBits(byte unitId, ModbusArea area, int start, int count, Span<bool> destination)
     {
         var unit = Resolve(unitId);
@@ -265,14 +338,14 @@ public sealed class ServerDataStore : IModbusDataStore
         lock (unit.Gate)
         {
             var blocks = unit.Blocks(area);
+            var status = RefreshRange(blocks, start, start + count);
+            if (status != 0) return status;
+
             for (var i = 0; i < count; i++)
             {
                 var address = start + i;
-                var block = blocks.FirstOrDefault(b => b.Contains(address));
+                var block = Find(blocks, address);
                 if (block is null) return ModbusExceptionCode.IllegalDataAddress;
-
-                block.Refresh();
-                if (block.Failed) return ModbusExceptionCode.ServerDeviceFailure;
 
                 destination[i] = block.Bits[address - block.WireStart];
             }
@@ -288,14 +361,14 @@ public sealed class ServerDataStore : IModbusDataStore
         lock (unit.Gate)
         {
             var blocks = unit.Blocks(area);
+            var status = RefreshRange(blocks, start, start + count);
+            if (status != 0) return status;
+
             for (var i = 0; i < count; i++)
             {
                 var address = start + i;
-                var block = blocks.FirstOrDefault(b => b.Contains(address));
+                var block = Find(blocks, address);
                 if (block is null) return ModbusExceptionCode.IllegalDataAddress;
-
-                block.Refresh();
-                if (block.Failed) return ModbusExceptionCode.ServerDeviceFailure;
 
                 destination[i] = block.Registers[address - block.WireStart];
             }
@@ -368,7 +441,7 @@ public sealed class ServerDataStore : IModbusDataStore
             var block = unit.Blocks(ModbusArea.HoldingRegister).FirstOrDefault(b => b.Contains(address));
             if (block is null) return ModbusExceptionCode.IllegalDataAddress;
 
-            block.Refresh();
+            block.Refresh();   // needed here too: 'current' is read before ApplyWrite runs
             var current = block.Registers[address - block.WireStart];
             var updated = (ushort)(current & andMask | orMask & ~andMask);
 

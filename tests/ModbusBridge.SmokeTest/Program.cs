@@ -1,4 +1,4 @@
-using ModbusBridge.Telemetry;
+﻿using ModbusBridge.Telemetry;
 using ModbusBridge.Core.Config;
 using ModbusBridge.Core.Data;
 using ModbusBridge.Core.Diagnostics;
@@ -148,6 +148,85 @@ internal static class Program
         await VJoyEndToEndChecks.RunAsync(engine, Check, Section, Note);
         await TelemetryChecks.RunAsync(engine, TelemetryPort, Check, Section, Note);
 
+        Section("Config round trip");
+        {
+            // Everything added recently has a config section. If any of them fails to survive a
+            // save and reload, a user's settings vanish the first time the GUI writes the file -
+            // and nothing else in this suite would notice.
+            var original = DefaultConfig.Create();
+            original.PcStats.Enabled = true;
+            original.PcStats.IntervalMs = 750;
+            original.Derived.Add(new DerivedTagConfig { Tag = "d.one", Expression = "a / b * 100" });
+            original.Recording.Enabled = true;
+            original.Recording.FileName = "rt.csv";
+            original.Recording.Tags.Clear();
+            original.Recording.Tags.Add("sim.*");
+            original.Replay.Enabled = true;
+            original.Replay.Path = "rt.csv";
+            original.Replay.Speed = 2.5;
+            original.Keyboard.Enabled = true;
+            original.Keyboard.DryRun = false;
+            original.Keyboard.Mappings.Add(new KeyMapping
+            {
+                Tag = "k.one", Keys = "ctrl+f1", Mode = KeyMode.Macro, RepeatMs = 40
+            });
+
+            var rtDevice = original.VJoy.Devices.FirstOrDefault();
+            if (rtDevice is null) { rtDevice = new VJoyDeviceConfig(); original.VJoy.Devices.Add(rtDevice); }
+            rtDevice.Layers.Add(new VJoyShiftLayer { Name = "shift", ModifierTag = "m.tag", Priority = 3 });
+            rtDevice.Profiles.Add(new VJoyProfile { Name = "farm", Games = { "Farming*" } });
+            rtDevice.ProfileTag = "sel.tag";
+            rtDevice.Buttons.Add(new VJoyButtonMapping
+            {
+                Tag = "b.one", Button = 42, Layer = "shift", Profile = "farm", Mode = VJoyButtonMode.Toggle
+            });
+            rtDevice.Povs.Add(new VJoyPovMapping
+            {
+                Pov = 1, Source = VJoyPovSource.Contacts, Kind = VJoyPovKind.Discrete, UpTag = "u.tag"
+            });
+
+            var file = Path.Combine(Path.GetTempPath(), $"mbb-rt-{Guid.NewGuid():N}.json");
+            try
+            {
+                var service = new ConfigService(file);
+                service.Save(original);
+                var loaded = service.Load();
+
+                Check(loaded.PcStats.Enabled && loaded.PcStats.IntervalMs == 750, "pcStats survives");
+                Check(loaded.Derived.Count == 1 && loaded.Derived[0].Expression == "a / b * 100",
+                      $"derived survives (got {loaded.Derived.Count})");
+                Check(loaded.Recording.Enabled && loaded.Recording.Tags.Count == 1
+                      && loaded.Recording.Tags[0] == "sim.*",
+                      $"recording survives with its patterns (got {loaded.Recording.Tags.Count})");
+                Check(loaded.Replay.Enabled && Math.Abs(loaded.Replay.Speed - 2.5) < 1e-9, "replay survives");
+                Check(loaded.Keyboard.Enabled && !loaded.Keyboard.DryRun
+                      && loaded.Keyboard.Mappings.Count == 1
+                      && loaded.Keyboard.Mappings[0].Mode == KeyMode.Macro,
+                      "keyboard survives, including its mode enum");
+
+                var back = loaded.VJoy.Devices.FirstOrDefault();
+                Check(back is not null && back.Layers.Count == 1 && back.Layers[0].Priority == 3,
+                      "shift layers survive");
+                Check(back is not null && back.Profiles.Count == 1
+                      && back.Profiles[0].Games.Count == 1,
+                      "profiles survive with their game patterns");
+                Check(back is not null && back.ProfileTag == "sel.tag", "profileTag survives");
+
+                var button = back?.Buttons.FirstOrDefault(b => b.Button == 42);
+                Check(button is not null && button.Layer == "shift" && button.Profile == "farm",
+                      "a mapping keeps its layer and profile");
+
+                var pov = back?.Povs.FirstOrDefault();
+                Check(pov is not null && pov.Source == VJoyPovSource.Contacts
+                      && pov.Kind == VJoyPovKind.Discrete && pov.UpTag == "u.tag",
+                      "hat source and kind enums survive");
+            }
+            finally
+            {
+                try { File.Delete(file); } catch { }
+            }
+        }
+
         Section("Bug hunt regressions");
         {
             // A pattern whose prefix and suffix overlap must not match a name too short to contain
@@ -177,6 +256,65 @@ internal static class Program
             Check(sink.Sent.Contains("down f9"), "macro pressed the first key");
             await feeder.StopAsync();             // cancel mid-press
             Check(sink.Sent.Contains("up f9"), "macro released its key when stopped mid-press");
+        }
+
+        Section("Bug hunt 2 regressions");
+        {
+            // A block whose points are all read-only. A client write must be refused AND must not
+            // change what the block reports: the image used to be overlaid before the writability
+            // check, so a rejected write left the client's bytes in place until each tag moved.
+            var bus = new ModbusBridge.Core.Tags.TagBus();
+            var block = new ServerBlockConfig
+            {
+                Name = "ro", Area = ModbusArea.HoldingRegister, StartAddress = 0, Size = 16
+            };
+            block.Points.Add(new PointConfig { Tag = "ro.a", Offset = 0, DataType = PointDataType.UInt16, Access = AccessMode.Read });
+            block.Points.Add(new PointConfig { Tag = "ro.b", Offset = 1, DataType = PointDataType.UInt16, Access = AccessMode.ReadWrite });
+            // Two bools sharing one register, one writable and one not.
+            block.Points.Add(new PointConfig { Tag = "ro.bit0", Offset = 2, DataType = PointDataType.Bool, BitIndex = 0, Access = AccessMode.ReadWrite });
+            block.Points.Add(new PointConfig { Tag = "ro.bit1", Offset = 2, DataType = PointDataType.Bool, BitIndex = 1, Access = AccessMode.Read });
+
+            var map = new ServerMapConfig { Name = "m", UnitId = 1 };
+            map.Blocks.Add(block);
+            var serverConfig = new ModbusServerConfig { Name = "regress" };
+            serverConfig.Maps.Clear();
+            serverConfig.Maps.Add(map);
+
+            var store = new ServerDataStore(serverConfig, bus);
+            bus.GetOrAdd("ro.a").Set(ModbusBridge.Core.Tags.TagValue.Good(1234), "test");
+            bus.GetOrAdd("ro.b").Set(ModbusBridge.Core.Tags.TagValue.Good(5), "test");
+            bus.GetOrAdd("ro.bit0").Set(ModbusBridge.Core.Tags.TagValue.Good(0), "test");
+            bus.GetOrAdd("ro.bit1").Set(ModbusBridge.Core.Tags.TagValue.Good(1), "test");
+
+            var context = new ModbusRequestContext("regress", "198.51.100.7:1");
+            var payload = new ushort[] { 0xDEAD, 0xBEEF, 0x0001 };   // bit0 set, bit1 cleared
+            var status = store.WriteRegisters(1, 0, payload, context);
+            Check(status == 0, "a write covering read-only and writable points is accepted");
+
+            var image = new ushort[3];
+            store.ReadHoldingRegisters(1, 0, 3, image);
+            Check(image[0] == 1234, $"the read-only point kept its own value (got {image[0]})");
+            Check(bus.GetOrAdd("ro.a").Value.Number == 1234, "the read-only tag was not republished");
+            Check(image[1] == 0xBEEF && bus.GetOrAdd("ro.b").Value.Number == 0xBEEF,
+                  "the writable point in the same request did take the write");
+            Check(bus.GetOrAdd("ro.bit0").Value.Number == 1, "the writable packed bit was set");
+            Check(bus.GetOrAdd("ro.bit1").Value.Number == 1,
+                  "the read-only bit sharing that register survived");
+            Check(image[3 - 1] == 0x0003, $"the shared register reads back 0x0003 (got 0x{image[2]:X4})");
+
+            // Addresses inside the block but not mapped to any point must still read as zero.
+            var gap = new ushort[6];
+            store.WriteRegisters(1, 0, new ushort[] { 1, 2, 3, 4, 5, 6 }, context);
+            store.ReadHoldingRegisters(1, 0, 6, gap);
+            Check(gap[3] == 0 && gap[4] == 0 && gap[5] == 0,
+                  $"unmapped addresses inside the block still read as 0 (got {gap[3]},{gap[4]},{gap[5]})");
+
+            // A write that lands entirely on read-only points is refused.
+            var refused = store.WriteRegisters(1, 0, new ushort[] { 0xFFFF }, context);
+            Check(refused == ModbusExceptionCode.IllegalDataAddress,
+                  "a write hitting only read-only points is refused");
+            store.ReadHoldingRegisters(1, 0, 1, image);
+            Check(image[0] == 1234, "and the refused write still changed nothing");
         }
 
         Section("Telemetry schema chunking");

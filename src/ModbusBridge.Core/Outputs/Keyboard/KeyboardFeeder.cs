@@ -1,4 +1,4 @@
-using ModbusBridge.Core.Config;
+﻿using ModbusBridge.Core.Config;
 using ModbusBridge.Core.Diagnostics;
 using ModbusBridge.Core.Tags;
 
@@ -152,7 +152,13 @@ public sealed class KeyboardFeeder : IAsyncDisposable
                     break;
 
                 case KeyMode.Tap:
-                    if (input && !key.LastInput && key.HasSeenInput) TapAll(key);
+                    // HasSeenInput gates both branches. Without it on the repeat branch, a tag that
+                    // is already true when the feeder starts taps immediately - NextRepeatTicks is
+                    // still 0, so "now >= it" is trivially true - which is the startup keystroke the
+                    // edge check exists to prevent.
+                    if (!key.HasSeenInput) break;
+
+                    if (input && !key.LastInput) TapAll(key);
                     else if (input && key.Config.RepeatMs > 0 && now >= key.NextRepeatTicks)
                     {
                         TapAll(key);

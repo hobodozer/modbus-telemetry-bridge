@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
 using ModbusBridge.Core.Config;
 using ModbusBridge.Core.Data;
@@ -336,6 +336,15 @@ public sealed class TelemetryIngestServer : IAsyncDisposable
         {
             if (!_schemaChunks.TryGetValue(schemaId, out var pending))
             {
+                // Evict here rather than on completion. UDP drops chunks, and a schema missing one
+                // never completes - so the old cleanup, which only ran after a successful
+                // reassembly, was on the one path where nothing could accumulate.
+                if (_schemaChunks.Count >= 8)
+                {
+                    Log.Debug(WriterId, $"Discarding {_schemaChunks.Count} incomplete schema(s).");
+                    _schemaChunks.Clear();
+                }
+
                 pending = new Dictionary<int, List<TelemetryProperty>>();
                 _schemaChunks[schemaId] = pending;
             }
@@ -352,9 +361,6 @@ public sealed class TelemetryIngestServer : IAsyncDisposable
 
             _schemas[schemaId] = complete;
             _schemaChunks.Remove(schemaId);
-
-            // Ids of schemas we will never complete would otherwise accumulate across restarts.
-            if (_schemaChunks.Count > 8) _schemaChunks.Clear();
 
             Log.Debug(WriterId, $"Schema {schemaId:X8} reassembled from {chunkCount} chunk(s), " +
                                 $"{complete.Count} propertie(s).");
