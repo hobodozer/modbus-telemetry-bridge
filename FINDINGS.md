@@ -551,3 +551,38 @@ This was written after `tools/health.ps1` reported "game FS25 running" from the 
 and that reading was repeated to the user three times while the machine had no such process. The
 lesson is not about SimHub: a register whose name sounds like the question is not the same as a
 register that answers it.
+
+---
+
+## 19. Why the documentation rule exists
+
+`CLAUDE.md` states the rule in four lines because it is paid for on every turn of every session.
+The argument for it lives here, where it is read once and on purpose.
+
+Stale documentation is worse than none, because it gets believed and then re-derived at cost.
+Each of these was found rotten and had to be reconstructed from the source:
+
+<!-- repo-check: ignore-block -->
+
+- `README.md` said keyboard output, shift layers, the network scanner, derived tags and CSV
+  record/replay were "Not started". All five were built and shipping.
+- `README.md` said GPU load "is not collected" in four separate places. `Inputs/GpuCounter.cs`
+  had been collecting it through PDH for a day. Register 7 reading 0.1% settled it.
+- Section 15 here said "the catalog is chunked, the schema is NOT" and quoted a ceiling of ~66
+  components. The schema had been chunked and the ceiling removed.
+- `CLAUDE.md` itself said "the plugin's schema is one datagram and is not chunked" - in the file
+  loaded into every session, a day after chunking landed.
+- `tools/make-hmi-map.py --help` cited the same dead 8 KB ceiling.
+- Nine copy-pasteable commands across three files were silently corrupted by interpreted
+  backslash escapes and could not have worked. Two more hid in `rig.ps1`'s own help text.
+
+`tools/repo-check.py` now automates the checkable part of that list. Note what it did **not**
+catch on its first outing: its schema pattern was written `"schema is NOT"`, case-sensitive, so it
+read past `is not chunked` and printed "ok". A check that silently stops matching is worse than no
+check, so every pattern now carries an example it must match and a counter-example it must not,
+and `--self-test` asserts both before the real checks run.
+
+The ordering rule matters as much as the content: update the docs **in the commit that makes the
+change true**. A documentation pass afterwards is the one that never happens.
+
+<!-- repo-check: end-ignore -->

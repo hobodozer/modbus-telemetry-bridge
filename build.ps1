@@ -56,7 +56,7 @@ if ($running) {
 }
 
 Step "Building ($Configuration)"
-dotnet build ModbusBridge.sln -c $Configuration --nologo -v minimal
+dotnet build ModbusBridge.sln -c $Configuration --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { throw "Build failed." }
 
 # The SimHub plugin is intentionally outside the solution: it targets net48 and references
@@ -67,7 +67,7 @@ $simHub = @("${env:ProgramFiles(x86)}\SimHub", "$env:ProgramFiles\SimHub") |
 if ($simHub) {
     Step "Building the SimHub plugin (SimHub found at $simHub)"
     dotnet build plugin\ModbusBridge.SimHubPlugin\ModbusBridge.SimHubPlugin.csproj `
-        -c $Configuration -p:SimHubPath="$simHub" --nologo -v minimal
+        -c $Configuration -p:SimHubPath="$simHub" --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "SimHub plugin build failed." }
 }
 else {
@@ -83,7 +83,7 @@ if (-not $SkipTests) {
     Step "Probing the server data store"
     # Asserts the write-masking invariants and that read cost does not scale with map size.
     # The smoke test checks behaviour at one size; this is what catches a per-register cost.
-    dotnet run --project tools\store-probe\StoreProbe.csproj -c $Configuration --nologo -v quiet
+    dotnet run --project tools\store-probe\StoreProbe.csproj -c $Configuration --nologo -v quiet -- --quiet
     if ($LASTEXITCODE -ne 0) { throw "Store probe failed." }
 
     Step "Running the UI self-test"
@@ -117,7 +117,7 @@ if ($Publish) {
         -p:EnableCompressionInSingleFile=true `
         -p:DebugType=none `
         -o $OutputPath `
-        --nologo -v minimal
+        --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "Publish failed." }
 
     # The single-file host still drops a .pdb next to the exe unless asked not to; tidy anything left.

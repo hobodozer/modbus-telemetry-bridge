@@ -20,10 +20,20 @@ internal static class Program
     private const int TelemetryPort = 15601;
 
     private static int _failures;
+    private static int _passes;
 
-    private static async Task<int> Main()
+    /// <summary>
+    /// Quiet by default: failures, notes and a one-line summary. A full run prints 202 PASS lines
+    /// and 56 log lines - about 4,200 tokens - to say "everything worked", and nobody reads them
+    /// unless something broke. Pass --verbose when something has.
+    /// </summary>
+    private static bool _verbose;
+
+    private static async Task<int> Main(string[] args)
     {
-        Log.MinimumLevel = LogLevel.Info;
+        _verbose = args.Any(a => a is "--verbose" or "-v");
+
+        Log.MinimumLevel = _verbose ? LogLevel.Info : LogLevel.Warn;
         Log.Entry += entry => Console.WriteLine($"  [{entry.Level,-5}] {entry.Source}: {entry.Message}");
 
         // Low-level vJoy checks run first and release the device, so the engine's feeder can own it.
@@ -633,11 +643,12 @@ internal static class Program
         Console.WriteLine();
         if (_failures == 0)
         {
-            Console.WriteLine("ALL CHECKS PASSED");
+            Console.WriteLine($"ALL CHECKS PASSED ({_passes})");
             return 0;
         }
 
-        Console.WriteLine($"{_failures} CHECK(S) FAILED");
+        Console.WriteLine($"{_failures} CHECK(S) FAILED of {_passes + _failures}");
+        Console.WriteLine("re-run with --verbose for the full list");
         return 1;
     }
 
@@ -931,6 +942,7 @@ internal static class Program
     /// <summary>An informational line that is neither a pass nor a fail (skips, environment facts).</summary>
     private static void Note(string text)
     {
+        if (!_verbose) return;
         var previous = Console.ForegroundColor;
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.Write("  ....  ");
@@ -940,13 +952,17 @@ internal static class Program
 
     private static void Section(string title)
     {
+        if (!_verbose) return;
         Console.WriteLine();
         Console.WriteLine($"== {title} " + new string('=', Math.Max(0, 60 - title.Length)));
     }
 
     private static void Check(bool condition, string description)
     {
-        if (!condition) _failures++;
+        // A failure always prints, whatever the verbosity - that is the whole output in quiet mode.
+        if (condition) _passes++; else _failures++;
+        if (condition && !_verbose) return;
+
         var previous = Console.ForegroundColor;
         Console.ForegroundColor = condition ? ConsoleColor.Green : ConsoleColor.Red;
         Console.Write(condition ? "  PASS  " : "  FAIL  ");
