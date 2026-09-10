@@ -25,6 +25,7 @@ Prefer these to improvising - each replaces work that was being redone by hand.
 .\rig.ps1 outline DeviceRunner   # types + members with line numbers - then read a range, not 771 lines
 .\rig.ps1 errors                 # warnings and errors only, from the newest log
 .\rig.ps1 check                  # static repo consistency, ~1 s, no build
+.\rig.ps1 portable               # build a pristine copy: no .git, no rig/, no build output
 .\rig.ps1 probe                  # server data store: read scaling + write masking
 .\rig.ps1 build | start | stop | restart | log | read | map | capture | scan
 .\build.ps1                      # check + build + smoke test + probe + UI self-test
@@ -82,8 +83,14 @@ not restart it - `.\rig.ps1 build` does both.
   `\r`, the damage is non-printing, and it has corrupted eleven commands here. Escaping harder does
   not work; building the backslash as `chr(92)` does. Verify with `.\rig.ps1 check` - do not
   hand-roll the regex, the obvious one omits `\x0d`.
-- **A passing local build says nothing about the repository.** `.\rig.ps1 check` catches it before
-  you commit; `.\rig.ps1 verify-clone` proves it but clones `origin`, so run it **after** the push.
+- **This must compile on any Windows machine, and on Linux barring a rewrite.** Only the WPF
+  app may be Windows-pinned - everything else is plain `net8.0`, with the P/Invoke guarded at
+  runtime. `git`, `python`, `pwsh`, SimHub and vJoy are all optional to a build. Windows ships
+  PowerShell 5.1 and not `pwsh`, so scripts must parse under 5.1.
+- **A passing local build says nothing about anyone else's machine.** Every portability breach
+  here was found by a stranger's build failing, never by testing. `.\rig.ps1 check` covers the
+  static rules; `.\rig.ps1 portable` builds a copy with no `.git`, no `rig/` and no build output;
+  `.\rig.ps1 verify-clone` clones `origin`, so run that one **after** the push.
 - **Verify through a different path than the one that wrote the data.** vJoy via winmm, the server
   via a real client socket, the HMI via `tshark` (installed, loopback too). Do not trust config to
   mean what it says.

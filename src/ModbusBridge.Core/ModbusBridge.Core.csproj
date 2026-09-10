@@ -1,7 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- Plain net8.0, not net8.0-windows: the engine, protocol and tag bus have no Windows
+         SDK dependency. The Windows-only parts are P/Invoke (vJoy, SendInput, PDH, timer
+         resolution), which compiles anywhere and is guarded at runtime. Only the WPF app is
+         genuinely Windows-bound, so pinning this too made the whole solution unbuildable off
+         Windows for no reason. -->
+    <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>

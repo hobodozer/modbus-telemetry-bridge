@@ -373,6 +373,70 @@ def check_stale_claims(report):
             report.note("{0} line(s) skipped as quoted history".format(quoted))
 
 
+# Only this project may be pinned to Windows. WPF genuinely cannot be anything else; everything
+# else in the tree can compile on plain net8.0 and therefore on Linux.
+WINDOWS_TFM_ALLOWED = {"src/modbusbridge.app/modbusbridge.app.csproj"}
+
+
+def check_portability(report):
+    """The requirement is that this compiles on any Windows machine, and on Linux barring a
+    rewrite. Every breach of it so far was discovered by someone else's machine failing: a
+    .gitignore rule that hid nine source files, a repo-check that assumed a git checkout, and
+    ModbusBridge.Core pinned to net8.0-windows despite having no Windows SDK dependency at all -
+    which made the engine, the protocol and the tests unbuildable off Windows for no reason.
+
+    Checked here so the next breach is caught by a build rather than by a stranger."""
+    report.check("Portability")
+
+    pinned = []
+    for path in list_files(suffix=".csproj"):
+        text = open(os.path.join(ROOT, path), encoding="utf-8-sig").read()
+        frameworks = re.findall(r"<TargetFrameworks?>([^<]*)</TargetFrameworks?>", text)
+        for value in frameworks:
+            for tfm in value.split(";"):
+                tfm = tfm.strip().lower()
+                if not tfm or "-" not in tfm:
+                    continue
+                if tfm.startswith("net4"):      # the SimHub plugin; net48 is Windows by definition
+                    continue
+                if path.replace(chr(92), "/").lower() in WINDOWS_TFM_ALLOWED:
+                    continue
+                pinned.append((path, tfm))
+
+    for path, tfm in pinned:
+        report.fail("{0} targets {1}. Only the WPF app may be Windows-pinned - P/Invoke compiles "
+                    "on plain net8.0 and is guarded at runtime.".format(path, tfm))
+    if not pinned:
+        report.ok("no project is Windows-pinned except the WPF app")
+
+    # Windows ships PowerShell 5.1; it does not ship pwsh. A script that only parses under 7 is
+    # unusable on a clean machine, which is the exact scenario this section exists for.
+    if os.name != "nt":
+        report.note("PowerShell 5.1 parse check skipped - not on Windows")
+        return
+
+    scripts = [p for p in list_files(suffix=".ps1")]
+    broken = 0
+    for script in scripts:
+        full = os.path.join(ROOT, script)
+        probe = (
+            "$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile("
+            "'{0}',[ref]$null,[ref]$e); if($e.Count){{ $e[0].Message }}".format(full.replace(chr(92), chr(92) * 2))
+        )
+        try:
+            out = subprocess.run(["powershell", "-NoProfile", "-Command", probe],
+                                 capture_output=True, text=True, timeout=60)
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            report.note("Windows PowerShell not runnable - 5.1 parse check skipped")
+            return
+        if out.stdout.strip():
+            report.fail("{0} does not parse under Windows PowerShell 5.1: {1}"
+                        .format(script, out.stdout.strip().splitlines()[0]))
+            broken += 1
+    if not broken:
+        report.ok("all {0} script(s) parse under Windows PowerShell 5.1".format(len(scripts)))
+
+
 CHECKS = [
     check_escape_damage,
     check_projects_in_solution,
@@ -380,6 +444,7 @@ CHECKS = [
     check_tools_documented,
     check_doc_paths_exist,
     check_stale_claims,
+    check_portability,
 ]
 
 
@@ -417,6 +482,29 @@ def self_test():
         lone_cr = data.count(bytes([CR])) - crlf
         control = sum(data.count(bytes([c])) for c in FORBIDDEN)
         flagged = bool(lone_cr or control)
+        if flagged != should_flag:
+            print("  FAIL  {0}: flagged={1}, expected {2}".format(label, flagged, should_flag))
+            failures += 1
+        else:
+            print("  ok    " + label)
+
+    print()
+    print("Portability rules")
+    # These encode the project's founding requirement: compile on any Windows machine, and on
+    # Linux barring a rewrite. Each breach so far was found by someone else's machine failing.
+    tfm_cases = [
+        ("a Windows-pinned library is rejected", "net8.0-windows", "src/whatever/Lib.csproj", True),
+        ("plain net8.0 is fine", "net8.0", "src/whatever/Lib.csproj", False),
+        ("the WPF app may be pinned", "net8.0-windows",
+         "src/ModbusBridge.App/ModbusBridge.App.csproj", False),
+        ("net48 is Windows by definition", "net48",
+         "plugin/ModbusBridge.SimHubPlugin/x.csproj", False),
+    ]
+    for label, tfm, path, should_flag in tfm_cases:
+        low = tfm.strip().lower()
+        flagged = ("-" in low
+                   and not low.startswith("net4")
+                   and path.lower() not in WINDOWS_TFM_ALLOWED)
         if flagged != should_flag:
             print("  FAIL  {0}: flagged={1}, expected {2}".format(label, flagged, should_flag))
             failures += 1

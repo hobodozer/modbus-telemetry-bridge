@@ -23,6 +23,7 @@
     .\rig.ps1 map 16                 # regenerate the HMI register map
     .\rig.ps1 capture 8              # what the HMI actually asks for, via tshark
     .\rig.ps1 verify-clone           # clone from the remote and build it, clean
+    .\rig.ps1 portable               # build a pristine copy with no git, no rig, no config
     .\rig.ps1 log 30
 #>
 [CmdletBinding()]
@@ -30,7 +31,7 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet('status', 'health', 'build', 'test', 'start', 'stop', 'restart', 'read', 'tag', 'map',
                  'capture', 'log', 'errors', 'scan', 'check', 'config', 'probe', 'outline',
-                 'verify-clone')]
+                 'verify-clone', 'portable')]
     [string]$Task = 'status',
     [Parameter(Position = 1)][string]$A,
     [Parameter(Position = 2)][string]$B,
@@ -122,6 +123,43 @@ switch ($Task) {
         if ($A) { $scanArgs += $A }
         if ($B) { $scanArgs += @('--timeout', $B) }
         & $exe @scanArgs
+    }
+    'portable' {
+        # Simulates the machine that is NOT this one. Every portability breach so far was
+        # found by a stranger's build failing: a .gitignore rule that hid nine source files,
+        # a repo-check that assumed a git checkout, and Core pinned to net8.0-windows for no
+        # reason. Copies the tree WITHOUT .git, rig/, bin/ or obj/, then builds and tests it
+        # with nothing this machine happens to provide.
+        $temp = Join-Path $env:TEMP "mbb-portable-$(Get-Random)"
+        New-Item -ItemType Directory -Path $temp -Force | Out-Null
+        "copying a pristine tree to $temp"
+
+        $exclude = @('.git', 'bin', 'obj', 'rig', 'publish', '__pycache__', '.vs')
+        Get-ChildItem -Path $root -Force | Where-Object { $exclude -notcontains $_.Name } |
+            ForEach-Object { Copy-Item $_.FullName -Destination $temp -Recurse -Force -Exclude @() }
+        Get-ChildItem -Path $temp -Recurse -Force -Directory |
+            Where-Object { $exclude -contains $_.Name } |
+            ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+
+        try {
+            if (Test-Path (Join-Path $temp '.git')) { throw 'the copy still has a .git - the test would be meaningless' }
+
+            "--- dotnet build, no scripts, no git, no config ---"
+            dotnet build (Join-Path $temp 'ModbusBridge.sln') -c Release --nologo -v quiet
+            if ($LASTEXITCODE -ne 0) { throw 'a pristine tree does not build' }
+
+            "--- repo-check, with no git index to lean on ---"
+            python (Join-Path $temp 'tools\repo-check.py') --quiet
+            if ($LASTEXITCODE -ne 0) { throw 'repo-check fails on a pristine tree' }
+
+            "--- smoke test ---"
+            dotnet run --project (Join-Path $temp 'tests\ModbusBridge.SmokeTest\ModbusBridge.SmokeTest.csproj') -c Release --no-build
+            if ($LASTEXITCODE -ne 0) { throw 'the smoke test fails on a pristine tree' }
+
+            ""
+            "a tree with no .git, no rig/ and no build output compiles and passes"
+        }
+        finally { Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue }
     }
     'verify-clone' {
         # Building the working tree proves nothing about what was committed. An ignore rule once
