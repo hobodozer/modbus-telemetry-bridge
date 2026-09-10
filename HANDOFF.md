@@ -64,6 +64,13 @@ new hat checks, after every change below.
 - `tools/read-tag.ps1` - read a tag **by name**. Resolves the address from the config, reads
   it, decodes it and applies the scaling. Checking one value used to be three manual steps,
   and getting the scaling step wrong looks exactly like a dead data source.
+- `src/ModbusBridge.Avalonia` - cross-platform GUI, **in progress**. Currently a DataGrid
+  spike only: an editable grid over the real point list, testing the one thing Avalonia
+  cannot do the WPF way. It builds and runs on both platforms; no real view has been ported.
+- `src/ModbusBridge.ViewModels` - UI-framework-free view models shared by both GUIs.
+  `HealthState` replaces `Brush`; `IDialogService`/`IUiDispatcher`/`IUiTimer` replace direct
+  `MessageBox` and `Dispatcher` use. Only `ObservableObject` and the commands have moved so
+  far - Status, Panel and Main are still WPF-coupled.
 - `src/ModbusBridge.Cli` - headless host. Same `BridgeEngine`, no WPF, plain net8.0. Verified
   against the live rig: PLC connected, HMI server listening, vJoy acquired, 425 tags. This is
   what makes "runs off Windows" testable at all; **it is not a substitute for the GUI** -

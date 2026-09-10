@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using ModbusBridge.Core.Diagnostics;
 
 namespace ModbusBridge.Core.Inputs;
@@ -30,9 +30,29 @@ internal sealed class GpuCounter : IDisposable
 
     public GpuCounter()
     {
-        if (PdhOpenQuery(null, IntPtr.Zero, out _query) != 0)
+        // pdh.dll is Windows-only, and this runs in a constructor, so an unguarded call does not
+        // degrade - it throws DllNotFoundException out of BridgeEngine.StartAsync and kills the
+        // process. That is exactly what happened the first time the Linux build met a config with
+        // pcStats enabled. IsAvailable stays false and GPU simply stays 0.
+        if (!OperatingSystem.IsWindows())
         {
             _query = IntPtr.Zero;
+            Log.Info("pcstats", "GPU counters need Windows performance counters; GPU stays 0.");
+            return;
+        }
+
+        try
+        {
+            if (PdhOpenQuery(null, IntPtr.Zero, out _query) != 0)
+            {
+                _query = IntPtr.Zero;
+                return;
+            }
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            _query = IntPtr.Zero;
+            Log.Info("pcstats", $"GPU counters unavailable ({ex.GetType().Name}); GPU stays 0.");
             return;
         }
 

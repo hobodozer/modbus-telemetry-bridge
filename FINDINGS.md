@@ -586,3 +586,51 @@ The ordering rule matters as much as the content: update the docs **in the commi
 change true**. A documentation pass afterwards is the one that never happens.
 
 <!-- repo-check: end-ignore -->
+
+---
+
+## 20. Linux, verified rather than assumed (2026-09-10)
+
+Tested in WSL2 Debian 13 on the rig itself, which shares the host network - so the Linux build
+talked to the **real** ET 200SP, not a simulator.
+
+**Works.** The whole cross-platform solution builds with 0 warnings. The smoke test passes (134
+checks; 68 vJoy ones correctly skip). The headless host connected to 192.0.2.10:502, polled it,
+served Modbus, and register 0 read 220 - protocol version 2.20, decoded correctly by a client
+reading the Linux bridge.
+
+**Three things it found that Windows never would have:**
+
+1. **`BridgeEngine.StartAsync` started the simulation last.** The virtual PLC lives there, and a
+   device runner configured to poll it dials on `Start()` - so the client raced its own server.
+   Windows loopback was forgiving enough to hide it for months; Linux refused the connection
+   every time and the smoke test recorded an error the Windows run never saw. Simulation now
+   starts first.
+
+2. **"P/Invoke is guarded at runtime" was not true.** Only `Clock` and `VJoyInterop` were. 
+   `GpuCounter` called `PdhOpenQuery` in its *constructor*, so on Linux it threw
+   `DllNotFoundException` out of `StartAsync` and killed the process - the bridge would not start
+   at all with `pcStats` enabled. `PcStatsCollector` (kernel32) and `KeySink` (user32 SendInput)
+   were unguarded too. All three degrade now.
+
+3. **Port 502 is privileged on Linux.** Anything below 1024 needs root or
+   `CAP_NET_BIND_SERVICE`, so the default config logs
+   `could not bind 0.0.0.0:502: Permission denied` and carries on serving nothing. The engine
+   correctly keeps running rather than dying, but the server is dead. Either move the server to a
+   high port, or grant the capability once:
+
+       sudo setcap cap_net_bind_service=+ep $(readlink -f $(which dotnet))
+
+**Known gaps on Linux, not bugs:** vJoy is Windows-only and has no equivalent (uinput would be a
+separate implementation). Host statistics are Windows-only - CPU and memory read 0 because the
+collector is kernel32-based; `/proc/stat` and `/proc/meminfo` would fix that and have not been
+written. `winmm` timer resolution does not apply.
+
+**How to repeat it.** WSL needs the .NET SDK, installed without root:
+
+       curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 8.0 --install-dir ~/.dotnet
+       sudo apt-get install -y libicu-dev      # or dotnet aborts on any culture operation
+       cd /mnt/<repo> && ./build.sh
+
+Build out of `/mnt`: sharing `bin`/`obj` with the Windows build proves nothing about Linux and
+corrupts both.

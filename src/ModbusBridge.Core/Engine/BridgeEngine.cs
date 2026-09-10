@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using ModbusBridge.Core.Config;
 using ModbusBridge.Core.Diagnostics;
 using ModbusBridge.Core.Inputs;
@@ -90,6 +90,13 @@ public sealed class BridgeEngine : IAsyncDisposable
 
             DeclareTags();
 
+            // Before the device runners, not after. The virtual PLC lives in here, and a
+            // runner configured to poll it dials immediately on Start() - so starting the
+            // simulation last meant the client raced its own server. Windows loopback was
+            // forgiving enough to hide it; Linux refused the connection every time and the
+            // smoke test recorded an error the Windows run never saw.
+            StartSimulation();
+
             foreach (var clientConfig in Config.Clients)
             {
                 var runner = new DeviceRunner(clientConfig, Tags);
@@ -108,7 +115,6 @@ public sealed class BridgeEngine : IAsyncDisposable
             }
 
             StartVJoy();
-            StartSimulation();
 
             _housekeepingCts = new CancellationTokenSource();
             _housekeepingTask = Task.Run(() => HousekeepingAsync(_housekeepingCts.Token));

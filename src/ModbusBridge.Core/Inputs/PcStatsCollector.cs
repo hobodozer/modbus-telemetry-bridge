@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using ModbusBridge.Core.Config;
@@ -108,6 +108,8 @@ public sealed class PcStatsCollector : IAsyncDisposable
 
     private void SampleCpu()
     {
+        // kernel32 is Windows-only. Elsewhere CPU stays 0 rather than taking the bridge down.
+        if (!OperatingSystem.IsWindows()) return;
         if (!GetSystemTimes(out var idle, out var kernel, out var user)) return;
 
         var idleTicks = ToUInt64(idle);
@@ -138,6 +140,7 @@ public sealed class PcStatsCollector : IAsyncDisposable
 
     private void SampleMemory()
     {
+        if (!OperatingSystem.IsWindows()) return;
         var status = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
         if (!GlobalMemoryStatusEx(ref status)) return;
 

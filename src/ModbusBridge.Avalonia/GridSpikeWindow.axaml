@@ -1,0 +1,65 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ModbusBridge.AvaloniaApp"
+        x:Class="ModbusBridge.AvaloniaApp.GridSpikeWindow"
+        x:DataType="vm:GridSpikeViewModel"
+        Title="DataGrid spike - config point editor"
+        Width="1100" Height="700">
+
+  <DockPanel Margin="8">
+    <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" Text="{Binding Summary}" />
+
+    <!-- The real config editor's shape: an editable grid over the point list. The question this
+         spike answers is whether Avalonia's DataGrid carries it, since it has no
+         DataGridComboBoxColumn - the 11 enum columns in MainWindow.xaml need a template. -->
+    <DataGrid x:Name="Points"
+              ItemsSource="{Binding Points}"
+              AutoGenerateColumns="False"
+              CanUserReorderColumns="True"
+              CanUserResizeColumns="True"
+              CanUserSortColumns="True"
+              IsReadOnly="False"
+              GridLinesVisibility="All"
+              HeadersVisibility="All">
+      <DataGrid.Columns>
+        <DataGridCheckBoxColumn Header="On" Binding="{Binding Enabled}" Width="45" />
+        <DataGridTextColumn Header="Tag" Binding="{Binding Tag}" Width="2*" />
+        <DataGridTextColumn Header="Offset" Binding="{Binding Offset}" Width="70" />
+
+        <!-- No DataGridComboBoxColumn in Avalonia. This is the replacement pattern for all 11. -->
+        <DataGridTemplateColumn Header="Data type" Width="130">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding DataType}" VerticalAlignment="Center" Margin="6,0" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+          <DataGridTemplateColumn.CellEditingTemplate>
+            <DataTemplate>
+              <ComboBox ItemsSource="{Binding $parent[Window].((vm:GridSpikeViewModel)DataContext).DataTypes}"
+                        SelectedItem="{Binding DataType, Mode=TwoWay}"
+                        HorizontalAlignment="Stretch" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellEditingTemplate>
+        </DataGridTemplateColumn>
+
+        <DataGridTemplateColumn Header="Access" Width="120">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding Access}" VerticalAlignment="Center" Margin="6,0" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+          <DataGridTemplateColumn.CellEditingTemplate>
+            <DataTemplate>
+              <ComboBox ItemsSource="{Binding $parent[Window].((vm:GridSpikeViewModel)DataContext).AccessModes}"
+                        SelectedItem="{Binding Access, Mode=TwoWay}"
+                        HorizontalAlignment="Stretch" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellEditingTemplate>
+        </DataGridTemplateColumn>
+
+        <DataGridCheckBoxColumn Header="NC" Binding="{Binding Invert}" Width="45" />
+        <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*" />
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</Window>

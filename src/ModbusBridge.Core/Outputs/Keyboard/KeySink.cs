@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using ModbusBridge.Core.Diagnostics;
 
 namespace ModbusBridge.Core.Outputs.Keyboard;
@@ -48,6 +48,8 @@ public sealed class DryRunKeySink : IKeySink
 /// </summary>
 public sealed class SendInputKeySink : IKeySink
 {
+    private static bool _warnedUnsupported;
+
     public void Down(Keystroke key) => Send(key, false);
     public void Up(Keystroke key) => Send(key, true);
 
@@ -60,6 +62,19 @@ public sealed class SendInputKeySink : IKeySink
 
     internal static void SendScan(ushort virtualKey, bool up)
     {
+        // SendInput is user32. There is no cross-platform equivalent, so off Windows this sink
+        // does nothing rather than throwing - the dry-run sink is the default anyway, and a
+        // keyboard mapping that silently does nothing beats a bridge that will not start.
+        if (!OperatingSystem.IsWindows())
+        {
+            if (!_warnedUnsupported)
+            {
+                _warnedUnsupported = true;
+                Log.Warn("keyboard", "Keyboard output needs Windows (user32 SendInput); nothing is sent.");
+            }
+            return;
+        }
+
         var scan = (ushort)MapVirtualKey(virtualKey, 0);
         var flags = KeyeventfScancode | (up ? KeyeventfKeyup : 0u);
 
