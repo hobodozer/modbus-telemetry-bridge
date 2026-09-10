@@ -38,6 +38,7 @@ internal static class Program
 
         // Low-level vJoy checks run first and release the device, so the engine's feeder can own it.
         VJoyChecks.Run(Check, Section, Note);
+        UinputChecks.Run(Check, Section, Note);
 
         var engine = new BridgeEngine(BuildConfig());
         await engine.StartAsync();
@@ -97,12 +98,26 @@ internal static class Program
         await hmi.ConnectAsync(CancellationToken.None);
         Check(hmi.IsConnected, "HMI client connected to the bridge's server");
 
+        // The simulator waveform keeps moving sim.speedKph, so the tag cannot be sampled once
+        // and compared to a value read a moment later - it drifts between the two. That is what
+        // this check used to do, and it failed roughly one run in three on both platforms; it
+        // was written off twice as timing noise before anyone read the numbers (204.50 against
+        // 205.28, a 0.78 drift against a 0.5 tolerance).
+        //
+        // Bracketing the request answers the question actually being asked - does the server
+        // serve what the tag bus holds - without pretending a moving value is still.
+        var speedBefore = engine.Tags.GetNumber("sim.speedKph");
         var floats = await hmi.ReadHoldingRegistersAsync(1, 0, 8, CancellationToken.None);
+        var speedAfter = engine.Tags.GetNumber("sim.speedKph");
         var speed = ValueCodec.Decode(floats.AsSpan(0), PointDataType.Float32, WordOrder.HighFirst, ByteOrder.HighFirst);
         var rpm = ValueCodec.Decode(floats.AsSpan(2), PointDataType.Float32, WordOrder.HighFirst, ByteOrder.HighFirst);
-        var busSpeed = engine.Tags.GetNumber("sim.speedKph");
         Console.WriteLine($"    read back speed={speed:0.00} km/h, rpm={rpm:0.0}");
-        Check(Math.Abs(speed - busSpeed) < 0.5, $"served speed {speed:0.00} matches tag {busSpeed:0.00}");
+
+        var low = Math.Min(speedBefore, speedAfter) - 0.5;
+        var high = Math.Max(speedBefore, speedAfter) + 0.5;
+        Check(speed >= low && speed <= high,
+              $"served speed {speed:0.00} lies within the tag's range during the read " +
+              $"({speedBefore:0.00}..{speedAfter:0.00})");
         Check(rpm is > 0 and < 10000, $"rpm {rpm:0.0} is in a sane range");
 
         var coils = await hmi.ReadCoilsAsync(1, 0, 16, CancellationToken.None);

@@ -87,7 +87,8 @@ not restart it - `.\rig.ps1 build` does both.
   hand-roll the regex, the obvious one omits `\x0d`.
 - **Linux is verified, not assumed.** WSL2 Debian is on this machine and shares the host
   network, so the Linux build can be tested against the real PLC - it has been, and it found
-  three bugs Windows hid. Use it: FINDINGS 20 has the setup. Two live limits: **port 502 is
+  three bugs Windows hid. Use it: FINDINGS 20 has the setup. Joystick output works there too -
+  `UinputDevice` behind `IGamepadDevice`, same feeder. Two live limits: **port 502 is
   privileged on Linux** (needs `setcap` or a high port), and host statistics are Windows-only.
 - **This must compile on any Windows machine, and on Linux barring a rewrite.** Only the WPF
   app may be Windows-pinned - everything else is plain `net8.0`, with the P/Invoke guarded at

@@ -1,37 +1,19 @@
-using ModbusBridge.Core.Diagnostics;
+﻿using ModbusBridge.Core.Diagnostics;
+using ModbusBridge.Core.Outputs;
 
 namespace ModbusBridge.Core.Outputs.VJoy;
-
-/// <summary>What one configured vJoy device actually provides, read from the driver at open time.</summary>
-public sealed class VJoyCapabilities
-{
-    public required uint DeviceId { get; init; }
-    public required int ButtonCount { get; init; }
-    public required int ContinuousPovCount { get; init; }
-    public required int DiscretePovCount { get; init; }
-
-    /// <summary>Axes the device exposes, with the raw range the driver expects.</summary>
-    public required IReadOnlyDictionary<VJoyAxis, (long Min, long Max)> Axes { get; init; }
-
-    public bool HasAxis(VJoyAxis axis) => Axes.ContainsKey(axis);
-
-    public override string ToString() =>
-        $"device {DeviceId}: {ButtonCount} button(s), " +
-        $"{Axes.Count} axis/axes ({string.Join(", ", Axes.Keys)}), " +
-        $"{ContinuousPovCount} continuous + {DiscretePovCount} discrete POV(s)";
-}
 
 /// <summary>
 /// One acquired vJoy device. Reports are built in a <see cref="JoystickPositionV2"/> and pushed with
 /// a single <c>UpdateVJD</c> call, which costs one driver transition regardless of how many buttons
 /// changed.
 /// </summary>
-public sealed class VJoyDevice : IDisposable
+public sealed class VJoyDevice : IGamepadDevice
 {
     private JoystickPositionV2 _report;
     private bool _acquired;
 
-    private VJoyDevice(uint deviceId, VJoyCapabilities capabilities)
+    private VJoyDevice(uint deviceId, GamepadCapabilities capabilities)
     {
         DeviceId = deviceId;
         Capabilities = capabilities;
@@ -40,7 +22,7 @@ public sealed class VJoyDevice : IDisposable
     }
 
     public uint DeviceId { get; }
-    public VJoyCapabilities Capabilities { get; }
+    public GamepadCapabilities Capabilities { get; }
 
     /// <summary>Number of UpdateVJD calls that failed since open — a non-zero value means trouble.</summary>
     public long UpdateFailures { get; private set; }
@@ -100,10 +82,10 @@ public sealed class VJoyDevice : IDisposable
     /// Reads what a device offers without acquiring it, so the UI can ask "does this device have a
     /// continuous hat?" while the feeder owns it. Null when vJoy is not installed.
     /// </summary>
-    public static VJoyCapabilities? Probe(uint deviceId) =>
+    public static GamepadCapabilities? Probe(uint deviceId) =>
         VJoyInterop.IsAvailable ? ReadCapabilities(deviceId) : null;
 
-    private static VJoyCapabilities ReadCapabilities(uint deviceId)
+    private static GamepadCapabilities ReadCapabilities(uint deviceId)
     {
         var axes = new Dictionary<VJoyAxis, (long Min, long Max)>();
         foreach (var axis in Enum.GetValues<VJoyAxis>())
@@ -116,13 +98,14 @@ public sealed class VJoyDevice : IDisposable
             axes[axis] = (min, max);
         }
 
-        return new VJoyCapabilities
+        return new GamepadCapabilities
         {
             DeviceId = deviceId,
             ButtonCount = VJoyInterop.GetVJDButtonNumber(deviceId),
             ContinuousPovCount = VJoyInterop.GetVJDContPovNumber(deviceId),
             DiscretePovCount = VJoyInterop.GetVJDDiscPovNumber(deviceId),
-            Axes = axes
+            Axes = axes,
+            Driver = "vJoy"
         };
     }
 

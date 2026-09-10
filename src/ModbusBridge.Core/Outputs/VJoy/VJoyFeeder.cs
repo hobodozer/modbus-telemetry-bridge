@@ -1,6 +1,7 @@
-using ModbusBridge.Core.Config;
+﻿using ModbusBridge.Core.Config;
 using ModbusBridge.Core.Data;
 using ModbusBridge.Core.Diagnostics;
+using ModbusBridge.Core.Outputs;
 using ModbusBridge.Core.Tags;
 
 namespace ModbusBridge.Core.Outputs.VJoy;
@@ -119,7 +120,7 @@ public sealed class VJoyFeeder : IAsyncDisposable
     /// <summary>Layer/tag pairs, so a base mapping can tell when a layer overrides the same tag.</summary>
     private readonly HashSet<(string Layer, string Tag, string Profile)> _overrides = new();
 
-    private VJoyDevice? _device;
+    private IGamepadDevice? _device;
     private CancellationTokenSource? _cts;
     private Task? _loop;
     private long _lastLoopTicks = -1;
@@ -134,7 +135,7 @@ public sealed class VJoyFeeder : IAsyncDisposable
     public uint DeviceId => _config.DeviceId;
     public VJoyDeviceConfig Config => _config;
     public VJoyStatistics Statistics { get; } = new();
-    public VJoyCapabilities? Capabilities => _device?.Capabilities;
+    public GamepadCapabilities? Capabilities => _device?.Capabilities;
     public bool IsRunning => _loop is not null;
 
     /// <summary>Why the feeder is not running, when it is not.</summary>
@@ -188,7 +189,21 @@ public sealed class VJoyFeeder : IAsyncDisposable
     {
         if (_loop is not null) return true;
 
-        _device = VJoyDevice.Open(_config.DeviceId, out var error);
+        // vJoy on Windows, uinput on Linux. The rest of this class - shift layers, profiles,
+        // hat composition, the release-on-bad-quality logic - does not care which, which is the
+        // whole reason IGamepadDevice exists.
+        string? error;
+        if (Uinput.UinputDevice.IsSupported)
+        {
+            _device = Uinput.UinputDevice.Open(_config.DeviceId, buttonCount: 60,
+                                               name: $"Modbus Telemetry Bridge {_config.DeviceId}");
+            error = Uinput.UinputDevice.LastError;
+        }
+        else
+        {
+            _device = VJoyDevice.Open(_config.DeviceId, out error);
+        }
+
         if (_device is null)
         {
             Error = error;
@@ -241,7 +256,7 @@ public sealed class VJoyFeeder : IAsyncDisposable
     }
 
     /// <summary>Catches mappings that point at controls the device is not configured for.</summary>
-    private List<string> CheckMappings(VJoyCapabilities capabilities)
+    private List<string> CheckMappings(GamepadCapabilities capabilities)
     {
         var warnings = new List<string>();
 
@@ -344,7 +359,7 @@ public sealed class VJoyFeeder : IAsyncDisposable
     }
 
     /// <summary>Rebuilds the report from current tag values. Returns true if anything moved.</summary>
-    private bool Apply(VJoyDevice device, long nowTicks)
+    private bool Apply(IGamepadDevice device, long nowTicks)
     {
         var changed = false;
         var pressed = 0;

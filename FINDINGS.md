@@ -621,10 +621,27 @@ reading the Linux bridge.
 
        sudo setcap cap_net_bind_service=+ep $(readlink -f $(which dotnet))
 
-**Known gaps on Linux, not bugs:** vJoy is Windows-only and has no equivalent (uinput would be a
-separate implementation). Host statistics are Windows-only - CPU and memory read 0 because the
-collector is kernel32-based; `/proc/stat` and `/proc/meminfo` would fix that and have not been
-written. `winmm` timer resolution does not apply.
+**Joystick output: closed.** `UinputDevice` is the Linux counterpart to `VJoyDevice`, behind
+`IGamepadDevice`. Both sit under the *same* `VJoyFeeder`, so shift layers, per-game profiles,
+hat composition and the release-on-bad-quality logic exist once rather than twice - that logic
+is where the bugs have been.
+
+Verified by readback through **evdev**, a different kernel interface from the one that writes:
+button 3 pressed, X axis 20000, hat east, `SYN_REPORT` present, and `ClearAll` releasing again.
+Without the SYN_REPORT every write would "succeed" and nothing would reach a game, which only a
+readback catches.
+
+`/dev/uinput` is root-only by default. Grant it once:
+
+    KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"
+
+then add the user to `input`. Without it the device reports itself unavailable and everything
+else still runs. Reading back in a test additionally needs `/dev/input/event*`, which is why
+the readback assertions skip for a normal user and run as root.
+
+**Still Windows-only:** host statistics. CPU and memory read 0 because the collector is
+kernel32-based; `/proc/stat` and `/proc/meminfo` would fix it and have not been written.
+`winmm` timer resolution does not apply.
 
 **How to repeat it.** WSL needs the .NET SDK, installed without root:
 

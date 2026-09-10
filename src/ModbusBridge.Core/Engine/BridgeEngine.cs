@@ -180,11 +180,16 @@ public sealed class BridgeEngine : IAsyncDisposable
     {
         if (!Config.VJoy.Enabled) return;
 
-        if (!VJoyInterop.IsAvailable)
+        // Either backend will do. Checking only vJoy here is what made the Linux build a space
+        // heater: it polled a PLC and served Modbus but could not drive a game, which is the point
+        // of the rig.
+        var haveBackend = VJoyInterop.IsAvailable || Outputs.Uinput.UinputDevice.IsSupported;
+        if (!haveBackend)
         {
             // Not fatal: the rest of the bridge is useful without a virtual joystick, and this is
             // exactly what happens when the config is carried to a machine without vJoy installed.
-            Log.Warn("vjoy", VJoyInterop.LoadError ?? "vJoy is unavailable; joystick output is off.");
+            Log.Warn("vjoy", VJoyInterop.LoadError ?? "No virtual gamepad backend " +
+                             "(vJoy on Windows, /dev/uinput on Linux); joystick output is off.");
             return;
         }
 

@@ -571,6 +571,7 @@ src/ModbusBridge.Core/        Engine, protocol, config - no UI dependencies
   Inputs/                     SimHub telemetry ingest, host statistics, GPU counters, CSV replay
 src/ModbusBridge.App/         WPF desktop app + tray icon (Windows only)
 src/ModbusBridge.Cli/         Headless host - same engine, no GUI, runs anywhere
+src/ModbusBridge.Core/Outputs/Uinput/   Linux virtual gamepad, the counterpart to vJoy
 plugin/                       SimHub plugin (net48, outside the solution)
 shared/TelemetryProtocol.cs   Wire format, compiled into BOTH the bridge and the plugin
 tests/ModbusBridge.SmokeTest/ End-to-end test with no PLC hardware
