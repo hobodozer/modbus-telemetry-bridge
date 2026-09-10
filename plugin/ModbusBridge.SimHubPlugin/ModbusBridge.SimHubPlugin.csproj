@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- SimHub loads plugins into its own process, which is .NET Framework 4.8. AnyCPU because
+         SimHub ships both 32- and 64-bit subprocesses. -->
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>ModbusBridge.SimHubPlugin</AssemblyName>
+    <RootNamespace>ModbusBridge.SimHubPlugin</RootNamespace>
+    <UseWPF>true</UseWPF>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>1.0.0</Version>
+    <Company>ModbusBridge</Company>
+    <Product>Modbus Telemetry Bridge - SimHub plugin</Product>
+
+    <!-- Where SimHub is installed. Override with -p:SimHubPath=... if it lives elsewhere. -->
+    <SimHubPath Condition="'$(SimHubPath)' == ''">C:\Program Files (x86)\SimHub</SimHubPath>
+  </PropertyGroup>
+
+  <!-- SimHub's assemblies are not on NuGet; they are referenced straight out of the install.
+       Private=false keeps them out of the output folder - SimHub already has them loaded, and
+       shipping copies alongside the plugin causes assembly identity conflicts. -->
+  <ItemGroup>
+    <Reference Include="SimHub.Plugins">
+      <HintPath>$(SimHubPath)\SimHub.Plugins.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="GameReaderCommon">
+      <HintPath>$(SimHubPath)\GameReaderCommon.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SimHub.Logging">
+      <HintPath>$(SimHubPath)\SimHub.Logging.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="log4net">
+      <HintPath>$(SimHubPath)\log4net.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(SimHubPath)\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The same file the bridge compiles, so the wire format cannot drift. -->
+    <Compile Include="..\..\shared\TelemetryProtocol.cs" Link="TelemetryProtocol.cs" />
+  </ItemGroup>
+
+  <Target Name="WarnIfSimHubMissing" BeforeTargets="ResolveAssemblyReferences">
+    <Warning Condition="!Exists('$(SimHubPath)\SimHub.Plugins.dll')"
+             Text="SimHub not found at $(SimHubPath). Build with -p:SimHubPath=&quot;C:\Path\To\SimHub&quot;." />
+  </Target>
+
+</Project>

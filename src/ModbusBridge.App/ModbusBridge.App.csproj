@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <UseWPF>true</UseWPF>
+    <!-- WinForms is enabled purely for NotifyIcon; it keeps the tray icon dependency-free. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>ModbusBridge.App</RootNamespace>
+    <AssemblyName>ModbusBridge</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WFAC010: WinForms wants DPI configured via project property, but this is a WPF app that
+         only borrows NotifyIcon — WPF needs PerMonitorV2 declared in the manifest. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+    <AssemblyTitle>Modbus Telemetry Bridge</AssemblyTitle>
+    <Product>Modbus Telemetry Bridge</Product>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <!-- Portable publish: one self-contained exe that needs no .NET install on the target machine. -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ModbusBridge.Core\ModbusBridge.Core.csproj" />
+  </ItemGroup>
+
+</Project>

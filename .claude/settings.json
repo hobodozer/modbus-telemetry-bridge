@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git remote:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(python tools/:*)",
+      "PowerShell(dotnet build:*)",
+      "PowerShell(dotnet run --project tools:*)",
+      "PowerShell(pwsh -NoProfile -File .\\tools\\modbus-read.ps1:*)",
+      "PowerShell(Get-Content:*)",
+      "PowerShell(Get-ChildItem:*)",
+      "PowerShell(Get-Process:*)",
+      "PowerShell(Select-String:*)",
+      "PowerShell(Test-Path:*)",
+      "PowerShell(git status:*)",
+      "PowerShell(git log:*)"
+    ],
+    "ask": [
+      "PowerShell(Start-Process:*)",
+      "PowerShell(Stop-Process:*)",
+      "Bash(git push:*)",
+      "PowerShell(git push:*)"
+    ]
+  },
+  "env": {
+    "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+    "DOTNET_NOLOGO": "1"
+  }
+}

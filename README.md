@@ -1,0 +1,400 @@
+# Modbus Telemetry Bridge
+
+A configurable, portable Windows bridge between Modbus TCP hardware and PC/game telemetry.
+
+It is simultaneously a **Modbus TCP client** (polling your PLCs) and a **Modbus TCP server**
+(serving your HMIs), with an in-memory tag database in the middle. Nothing is hard-wired: every
+address, data type, scaling factor, poll rate and direction is configuration.
+
+```
+PLC #1 (Modbus server) ─┐                          ┌─► Modbus TCP SERVER  (N clients)
+PLC #2 (Modbus server) ─┼─► Modbus CLIENT ──┐      │     ├─ HMI #1  (unit id 1, map A)
+PLC #n ...             ─┘   (poll / write)  │      │     └─ HMI #2  (unit id 2, map B)
+                                            ▼      │
+SimHub  (phase 2) ───────────────────────► TAG BUS ┼─► vJoy feeder (phase 2)
+PC sensors (phase 3) ─────────────────────►        └─► GUI monitor, force/override, logging
+```
+
+Every source publishes named tags carrying a value, a quality and a timestamp. Every sink is just a
+mapping table pointing at those tags. The same telemetry tag can drive a PLC analog output, three
+HMIs and a vJoy axis at once, and an HMI's on-screen button becomes an input everywhere else.
+
+---
+
+## Status
+
+| Phase | Scope | State |
+| --- | --- | --- |
+| 1 | Tag bus, Modbus client + multi-client server, config, GUI, simulator | **Complete** |
+| 2a | vJoy feeder — buttons, axes, hats | **Complete**, tested against the real driver |
+| 2b | SimHub plugin and telemetry ingest | **Bridge side complete and tested**; plugin builds against the real SimHub assemblies but has not yet run inside SimHub |
+| 2c | Keyboard / macro output, vJoy shift layers | Not started |
+| 3 | Network scanner, derived-tag expressions, CSV record/replay, PC sensors | Not started |
+
+Everything marked complete is verified by the automated suites described under **Testing**.
+
+**Not yet verified against real hardware or apps:** the Siemens ET 200SP and the HMI (not present on
+the development machine), and the SimHub plugin running inside SimHub. The bridge half of the SimHub
+link is fully tested against a simulated plugin that compiles the same shared protocol file the real
+plugin does, so a wire-format mistake would fail the build — but "the plugin loads and streams
+inside SimHub" is still an untested claim.
+
+---
+
+## Quick start
+
+```powershell
+.\build.ps1 -Publish
+```
+
+That builds, runs both test suites and drops a portable, self-contained `publish\ModbusBridge.exe`
+(~68 MB, no .NET install needed on the target machine). Copy the folder anywhere.
+
+On first run it writes `config\bridge.json` beside the executable and starts the engine. If the
+install folder is read-only (e.g. Program Files) it falls back to `%LOCALAPPDATA%\ModbusBridge`.
+
+### Try it with no hardware
+
+1. Open the **Simulation** tab, tick **Enable simulation**, **Virtual PLC** and
+   **Generate telemetry waveforms**.
+2. On **Devices**, point the sample device at `127.0.0.1` port `15020` and tick **Enabled**.
+3. **Apply and restart**.
+
+The virtual PLC is a real Modbus TCP slave with animated inputs, so the whole read path, the tag
+bus, the HMI-facing server and the latency readout all exercise for real.
+
+### Command line
+
+| Argument | Meaning |
+| --- | --- |
+| `--config <path>` | Use a specific config file. |
+| `--data <dir>` | Put `config\` and `logs\` in this directory instead of beside the exe. |
+| `--selftest` | Walk every UI tab, report WPF binding errors, exit non-zero on failure. |
+
+---
+
+## The latency readout
+
+The dashboard shows, per device, in real time:
+
+| Metric | What it means |
+| --- | --- |
+| **poll cycle** | Wall-clock gap between consecutive reads of a group. **This is your input lag** — how long a contact can sit unnoticed. Green when it tracks the configured interval, red when it drifts. |
+| **round trip** | Time on the wire for the last request. |
+| **poll rate** | Completed group reads per second. |
+| avg / min / max / jitter | Round-trip statistics; **Reset** clears the high-water marks. |
+| worst cycle | Longest cycle since reset — catches occasional stalls a rolling average hides. |
+
+Expand **Per-group timing** for a per-read-group breakdown, so you can see which group is costing
+the time. The **Tags** tab shows each tag's **Age** — milliseconds since it last changed — which is
+the far end of the same chain.
+
+### About 10 ms polling on Windows
+
+Windows' default timer granularity is ~15.6 ms, so a naive 10 ms poll loop actually runs at 16 ms.
+The bridge raises the multimedia timer resolution to 1 ms while running and uses the high-resolution
+stopwatch counter for both scheduling and measurement, which holds a configured 10 ms interval to
+within a few tenths of a millisecond. If you would rather not pay the small idle-power cost, set
+`general.highResolutionTimer` to `false` — expect 16 ms cycles if you do.
+
+---
+
+## Addressing
+
+Modbus wire addresses are always 0-based; vendor documentation frequently is not. `addressBase` is
+subtracted from every address you type to get the wire address:
+
+| Style | Setting | Effect |
+| --- | --- | --- |
+| Wire / 0-based | `addressBase: 0` | Coil `0` is the first coil. |
+| 1-based | `addressBase: 1` | Coil `1` is the first coil. **Siemens `MB_SERVER` docs use this.** |
+| Modicon `4xxxx` | `addressBaseByArea` preset | `00001` coils, `10001` discrete, `30001` input regs, `40001` holding regs. |
+
+Use the **Presets…** button on the Devices tab to switch. Per-area bases exist because Modicon
+notation gives each area a different offset.
+
+**Word and byte order** are separate settings, per device and overridable per point:
+
+- `wordOrder` — which register holds the high word of a 32/64-bit value. Siemens S7 is `HighFirst`.
+- `byteOrder` — byte order inside each 16-bit register. `HighFirst` is the Modbus standard;
+  `Swapped` covers devices that do it backwards.
+
+If a float reads as garbage, it is almost always one of these two.
+
+---
+
+## Siemens ET 200SP notes
+
+For an ET 200SP CPU (1510SP / 1512SP) running the `MB_SERVER` instruction:
+
+- **Byte order**: S7 is big-endian throughout, so leave both `wordOrder` and `byteOrder` at
+  `HighFirst`. A Siemens `REAL` maps directly onto `Float32`.
+- **Address base**: Siemens documentation numbers holding registers from 1, so `addressBase: 1`
+  matches what the manual shows. (The Modicon `4xxxx` prefix is a notation convention, not part of
+  the wire address — do not type `40001` unless you also select the Modicon preset.)
+- **Register area**: `MB_SERVER` maps FC3/FC6/FC16 (and FC4) to the DB you pass in `MB_HOLD_REG`.
+  Bit functions (FC1/FC2/FC5/FC15) map to the CPU's bit memory area.
+- **Analog scaling**: Siemens analog channels use ±27648 counts for nominal full scale. The sample
+  config scales with `gain: 1/27648` on input and `27648/range` on output — adjust to your module's
+  actual range.
+- **One connection per `MB_SERVER` instance.** This is the big one: a single `MB_SERVER` call serves
+  exactly one TCP connection. If you want the PLC to accept connections from both this bridge and
+  something else, you need multiple `MB_SERVER` instances with distinct connection IDs in the PLC
+  program. The bridge opens one connection per configured device.
+- **Cycle time**: `MB_SERVER` only processes a request when it is called, so the PLC's own scan time
+  sets a floor under the round trip. If the poll-cycle readout is fine but round trip is high, look
+  at the PLC's OB cycle rather than the network.
+
+> These notes are from the Siemens documentation for `MB_SERVER`. Confirm against the manual for
+> your exact firmware before committing a design — I have not tested against your hardware.
+
+---
+
+## Configuration reference
+
+`config\bridge.json` is plain JSON and hot-reloads: save it in a text editor and the bridge picks it
+up (invalid files are rejected with a log entry rather than applied). Every save from the GUI writes
+a timestamped copy into `config\backups\`, keeping the 20 most recent.
+
+### Points
+
+A point binds a tag to an address. The fields that matter most:
+
+| Field | Meaning |
+| --- | --- |
+| `tag` | Tag name in the bus. Created automatically. Device `tagPrefix` is prepended. |
+| `offset` | Register or bit offset **relative to the group/block start**. |
+| `dataType` | `Bool`, `Int16`, `UInt16`, `Int32`, `UInt32`, `Int64`, `UInt64`, `Float32`, `Float64`, `String`. |
+| `bitIndex` | `0`–`15` for a Bool packed inside a register; `-1` otherwise. |
+| `invert` | **Normally-closed toggle.** On a Bool, a closed contact reads as 0 and an open contact as 1. On a numeric, negates after scaling. Applies symmetrically on writes. |
+| `access` | Server-side: `Read`, `Write`, or `ReadWrite`. A `ReadWrite` coil is how an HMI button becomes an input. |
+| `scale` | `gain`, `offset`, `min`, `max`, `deadband`. Engineering value = `raw * gain + offset`, clamped. |
+| `failsafeValue` | Served when the tag is bad/stale and the block uses `Failsafe`. |
+
+Use **Auto-fill…** to generate a numbered run of points in one step — `{n}` in the tag pattern
+becomes the index. It handles bit-packing (16 Bools per register) and multi-register strides for
+you, and warns if the run would overflow the block.
+
+### Read groups (PLC → PC)
+
+A contiguous span polled on its own schedule. Requests are split automatically to respect the
+device's per-request limits. A group that returns a Modbus exception logs once and backs off to 1 s
+rather than hammering the device, and its tags go to `Bad` quality.
+
+### Write groups (PC → PLC)
+
+| `mode` | Behaviour |
+| --- | --- |
+| `OnChange` | Writes when a mapped tag moves beyond its deadband. `periodMs` is the minimum gap between writes. |
+| `Periodic` | Writes every `periodMs` regardless. |
+| `OnChangeAndPeriodic` | Both — on change, with a periodic refresh as a keepalive. |
+
+Only the changed span is written unless `alwaysWriteWholeBlock` is set. The first write after
+connecting always sends the whole block so the PLC starts from a known state. A tag last written by
+the same device is never echoed back to it, which prevents write loops on shared registers.
+
+### Server maps
+
+One map per unit id. Two HMIs hitting the same listener with different unit ids see entirely
+different register maps. `acceptAnyUnitId` makes a map the fallback for unmapped unit ids.
+
+Each block chooses what happens when a tag goes bad or stale:
+
+| `staleBehavior` | Result |
+| --- | --- |
+| `HoldLastValue` | Keep serving the last known value. |
+| `Failsafe` | Serve each point's `failsafeValue`. |
+| `ModbusException` | Return exception 4 for any read touching the block, so the HMI knows the data is dead rather than showing a frozen number. |
+
+### Watchdog
+
+Optional per device. The bridge increments a counter into the PLC every `intervalMs`. If the PLC
+mirrors it back on `readAddress` and that echo stops changing for `timeoutMs`, the link is flagged
+unhealthy and `healthTag` goes false — which you can map straight into an HMI status lamp.
+
+### Security
+
+Per listener: `bindAddress` (pin to one NIC), `allowedClients` (IP or CIDR allow-list, empty means
+anyone), `readOnly` (reject every write function code), `maxClients`, and `idleTimeoutSec`.
+
+---
+
+## vJoy output
+
+Any tag can drive a virtual joystick control — a PLC contact, an HMI soft button, or a telemetry
+value. Counts are entirely configuration; nothing in the code assumes a number of buttons or axes.
+
+Set it up on the **vJoy** tab: tick **Enable vJoy output**, add a device, then map controls.
+**Auto-fill…** generates a whole numbered run at once (`plc1.di.btn{n}` → buttons 1..60).
+
+### Buttons
+
+| Mode | Behaviour |
+| --- | --- |
+| `Momentary` | Held for exactly as long as the tag is true. The default. |
+| `Toggle` | Each rising edge flips the button and it stays flipped — for a physical latching switch that a game should see as a press. |
+| `Pulse` | A rising edge emits a fixed-length press (`pulseMs`) however long the contact is held — for games that ignore very long presses. |
+
+`threshold` lets an analog value drive a button (default 0.5). `NC` inverts the sense, the same
+normally-open / normally-closed idea as on a Modbus point.
+
+### Axes
+
+`inputMin`/`inputMax` are the tag values that map to the ends of travel — **swap them to reverse an
+axis**. Then `deadzone` (fraction of travel around centre, re-stretched so full deflection is still
+reachable), `curve` (exponent; above 1 gives finer control near centre), `deadband` (ignore movement
+smaller than this, to reject a noisy analog input) and `invert`.
+
+### Hats
+
+The tag value is the hat angle in degrees; a negative value centres it.
+
+### Safety
+
+`releaseOnBadQuality` (on by default) releases every control and centres every axis if all the
+driving tags go bad — so a PLC dropping off cannot leave a throttle pinned or a button stuck down.
+The feeder also clears everything when the engine stops or the app exits.
+
+### Latency
+
+`updateIntervalMs` (default 5 ms) adds to the PLC poll interval to give total contact-to-game
+latency. A full report costs about **4 microseconds**, so this is cheap to lower — the smoke test
+runs it at 2 ms. The dashboard shows the achieved feed interval and its worst case.
+
+### If a mapping does not work
+
+The dashboard shows warnings for mappings that point at controls the device does not have — for
+example a button 60 mapping on a device configured for 8 buttons, or two tags fighting over one
+control. **Button and axis counts are set in vJoyConf, not here**: if you need 60 buttons and 4
+axes, configure the vJoy device for that and restart the bridge.
+
+---
+
+## SimHub telemetry
+
+Game telemetry reaches the bridge through a small SimHub plugin that talks to it over loopback UDP.
+
+The plugin holds **no property list of its own**. It advertises everything SimHub currently offers,
+and the bridge replies with the subset it wants streamed. So the property browser lives in the
+bridge's UI, the list always reflects the game that is actually loaded, and changing what you stream
+never means touching SimHub.
+
+### Installing the plugin
+
+```powershell
+.\install-simhub-plugin.ps1
+```
+
+Close SimHub first — the DLL cannot be replaced while it is loaded. SimHub normally lives under
+Program Files, so this usually needs an elevated prompt; the script says so plainly rather than
+half-installing. It also writes the plugin's settings to `%LOCALAPPDATA%\ModbusBridge\`, which never
+needs elevation.
+
+On the next start SimHub asks you to authorise the new plugin — say yes, enable **Modbus Telemetry
+Bridge** in its plugin list, and restart SimHub once more.
+
+### Using it
+
+1. On the bridge's **SimHub** tab, tick **Enable SimHub telemetry** and check the listen port
+   matches the plugin's (15600 by default). **Apply and restart**.
+2. Click **Browse SimHub properties…**. Search, multi-select, **Add selected**.
+3. **Apply and restart** to begin streaming.
+
+Leave a subscription's `Tag` empty and it is derived from the property name under the configured
+prefix (`SpeedKmh` → `sim.SpeedKmh`). Subscribe to the same property twice with different scaling to
+get it in two units at once — for instance `sim.SpeedKmh` raw and `sim.speedMph` with `gain 0.621371`
+— which saves doing unit maths in the PLC or the HMI.
+
+### Feedback: PLC contacts inside SimHub
+
+The **Feedback** tab sends bridge tags the other way. Each one appears in SimHub as a property
+`Bridge.<name>`, usable in dashboards and formulas, and raises a SimHub **event** on every rising
+edge — and a SimHub event can be bound to any SimHub action. That is how a PLC contact becomes an
+input SimHub itself can act on.
+
+### When the game closes
+
+If no frame arrives within `timeoutMs`, telemetry tags are marked bad and the `connectedTag` goes
+false. Combined with a block's `Failsafe` stale behaviour, an HMI shows a defined value instead of
+the last number from a session that ended ten minutes ago.
+
+### Latency
+
+The dashboard shows frame rate, arrival interval, worst interval, and a genuine **one-way** latency
+— the plugin stamps each frame with the system clock and both processes read the same clock, so it
+is not a round trip. SimHub's own data rate is the ceiling; `minIntervalMs` in the plugin settings
+is only a floor.
+
+---
+
+## Project layout
+
+```
+src/ModbusBridge.Core/        Engine, protocol, config - no UI dependencies
+  Config/                     Configuration model, validation, load/save/hot-reload
+  Data/                       Enums, scaling, register <-> value codec
+  Tags/                       Tag bus
+  Modbus/                     Modbus TCP client and multi-client server (no third-party stack)
+  Engine/                     Device runner (poll/write/watchdog), server data store, BridgeEngine
+  Simulation/                 Virtual PLC and waveform generator
+  Diagnostics/                Logging, high-resolution clock
+  Outputs/VJoy/               vJoy interop, device wrapper, feeder
+  Inputs/                     SimHub telemetry ingest
+src/ModbusBridge.App/         WPF desktop app + tray icon
+plugin/                       SimHub plugin (net48, outside the solution)
+shared/TelemetryProtocol.cs   Wire format, compiled into BOTH the bridge and the plugin
+tests/ModbusBridge.SmokeTest/ End-to-end test with no PLC hardware
+build.ps1                     Build, test, publish
+install-simhub-plugin.ps1     Build and install the SimHub plugin
+```
+
+The SimHub plugin is deliberately **outside** the solution: it targets .NET Framework 4.8 and
+references assemblies out of a SimHub install, so it must not break the main build on a machine
+without SimHub. `build.ps1` builds it only when it finds SimHub.
+
+The Modbus protocol is implemented directly rather than via a library, so the published exe carries
+no third-party dependencies and the framing, error handling and per-request limits are all
+inspectable in one place.
+
+Supported function codes: 1, 2, 3, 4, 5, 6, 15, 16, 22 (mask write), 23 (read/write multiple) and
+43/14 (device identification), both as client and as server.
+
+---
+
+## Testing
+
+```powershell
+dotnet run --project tests\ModbusBridge.SmokeTest    # engine end-to-end, no hardware
+.\build.ps1                                          # both suites
+```
+
+The smoke test stands up a virtual PLC, a device runner, the HMI-facing server and real Modbus
+clients, then checks the whole chain: polling, NO/NC inversion, scaling, serving, HMI writes landing
+back on tags, multiple concurrent clients, exception responses, codec round-trips across every
+word/byte-order combination, and that a 10 ms poll interval is actually held.
+
+**The vJoy checks drive the real driver and read the result back through a completely separate code
+path** — Windows' own `winmm` joystick API. That matters: if the `JOYSTICK_POSITION_V2` struct
+layout were wrong, writing would still "succeed" and only an independent readback would notice. The
+device under test is identified by pressing a button and seeing which joystick moves, because
+winmm's product string is a generic "Microsoft PC-joystick driver" rather than anything naming vJoy.
+
+Covered: button bitfield layout including the >32-button bank boundary, no cross-talk between
+buttons, axis scaling at 0/25/75/100% of travel, momentary vs toggle vs pulse timing, NO/NC
+inversion, the release-on-bad-quality failsafe, and `UpdateVJD` throughput. If vJoy is not installed
+or every device is busy, these checks skip with a note rather than failing.
+
+The UI self-test (`--selftest`) walks every tab and fails the build on any WPF binding error.
+
+---
+
+## Not yet built
+
+- **SimHub plugin** — a net48 DLL dropped into SimHub's plugin folder, streaming selected properties
+  to the bridge, with a property browser in this GUI, plus contacts fed back as SimHub input
+  triggers.
+- **Keyboard / macro output** — for games that ignore joystick input for certain functions.
+- **Shift layers** for vJoy buttons, so one physical button can send different vJoy buttons
+  depending on a modifier contact.
+- Network scanner, derived-tag expression engine, CSV record/replay, PC hardware sensors,
+  per-game profile switching, run-as-service.

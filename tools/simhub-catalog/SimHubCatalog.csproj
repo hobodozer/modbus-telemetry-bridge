@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SimHubCatalog</AssemblyName>
+    <RootNamespace>SimHubCatalog</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The same wire-format file the bridge and the plugin compile, so this cannot drift. -->
+    <Compile Include="..\..\shared\TelemetryProtocol.cs" Link="TelemetryProtocol.cs" />
+  </ItemGroup>
+</Project>

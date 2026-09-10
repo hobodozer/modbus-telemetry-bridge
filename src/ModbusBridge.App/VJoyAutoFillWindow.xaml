@@ -1,0 +1,61 @@
+<Window x:Class="ModbusBridge.App.VJoyAutoFillWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Auto-fill vJoy buttons" SizeToContent="Height" Width="520"
+        Style="{StaticResource AppWindow}"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False">
+
+    <StackPanel Margin="16">
+        <TextBlock Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Text="Maps a numbered run of tags onto a run of buttons. Use {n} in the tag pattern for the index; it is replaced with the counter, zero-padded to the width you choose." />
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+                <RowDefinition /><RowDefinition /><RowDefinition />
+            </Grid.RowDefinitions>
+
+            <Label Grid.Row="0" Grid.Column="0" Content="Tag pattern" />
+            <TextBox Grid.Row="0" Grid.Column="1" Margin="0,3" x:Name="PatternBox" Text="plc1.di.btn{n}" />
+
+            <Label Grid.Row="1" Grid.Column="0" Content="Count" />
+            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,3" x:Name="CountBox" Text="60" />
+
+            <Label Grid.Row="2" Grid.Column="0" Content="First tag index" />
+            <TextBox Grid.Row="2" Grid.Column="1" Margin="0,3" x:Name="FirstIndexBox" Text="1" />
+
+            <Label Grid.Row="3" Grid.Column="0" Content="Index digits" />
+            <TextBox Grid.Row="3" Grid.Column="1" Margin="0,3" x:Name="DigitsBox" Text="2" />
+
+            <Label Grid.Row="4" Grid.Column="0" Content="First vJoy button" />
+            <TextBox Grid.Row="4" Grid.Column="1" Margin="0,3" x:Name="FirstButtonBox" Text="1" />
+
+            <Label Grid.Row="5" Grid.Column="0" Content="Mode" />
+            <ComboBox Grid.Row="5" Grid.Column="1" Margin="0,3" x:Name="ModeCombo" />
+
+            <Label Grid.Row="6" Grid.Column="0" Content="Description" />
+            <TextBox Grid.Row="6" Grid.Column="1" Margin="0,3" x:Name="DescriptionBox" Text="Panel button {n}" />
+        </Grid>
+
+        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+            <Label Content="Pulse length (ms)" />
+            <TextBox Width="70" x:Name="PulseBox" Text="50" />
+            <CheckBox x:Name="InvertBox" Content="Normally closed (invert)" Margin="18,0,0,0" />
+        </StackPanel>
+
+        <Border Background="{StaticResource BgInput}" CornerRadius="3" Padding="8" Margin="0,12,0,0">
+            <TextBlock x:Name="PreviewText" Style="{StaticResource Muted}" TextWrapping="Wrap"
+                       FontFamily="Consolas" />
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <Button Content="Preview" Click="OnPreview" />
+            <Button Content="Cancel" Click="OnCancel" />
+            <Button Content="Generate" Click="OnGenerate" Style="{StaticResource PrimaryButton}" />
+        </StackPanel>
+    </StackPanel>
+</Window>

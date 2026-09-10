@@ -1,0 +1,13 @@
+﻿bin/
+obj/
+publish/
+config/
+logs/
+*.user
+rig/
+*.bak
+*.bak[0-9]
+*.units
+tools/tia/bin/
+.claude/settings.local.json
+tools/tia/*.log

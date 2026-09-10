@@ -1,0 +1,46 @@
+<Window x:Class="ModbusBridge.App.SimHubPropertyBrowser"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SimHub properties" Height="640" Width="820"
+        Style="{StaticResource AppWindow}"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+
+    <DockPanel Margin="14">
+
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <TextBlock x:Name="StatusText" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,8" />
+            <StackPanel Orientation="Horizontal">
+                <Label Content="Search" />
+                <TextBox x:Name="SearchBox" Width="300" TextChanged="OnSearchChanged" />
+                <TextBlock x:Name="CountText" Style="{StaticResource Muted}" Margin="12,0,0,0" />
+                <Button Content="Refresh from SimHub" Click="OnRefresh" Margin="16,0,0,0"
+                        ToolTip="Ask the plugin to resend the full property list." />
+            </StackPanel>
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <Label Content="Tag prefix" />
+                <TextBox x:Name="PrefixBox" Width="120" IsReadOnly="True" />
+                <TextBlock Style="{StaticResource Muted}" Margin="10,0,0,0"
+                           Text="Selected properties become tags under this prefix; edit tag names afterwards in the table." />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <TextBlock x:Name="SelectionText" Style="{StaticResource Muted}"
+                           VerticalAlignment="Center" Margin="0,0,14,0" />
+                <Button Content="Cancel" Click="OnCancel" />
+                <Button Content="Add selected" Click="OnAdd" Style="{StaticResource PrimaryButton}" />
+            </StackPanel>
+        </StackPanel>
+
+        <DataGrid x:Name="PropertyGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                  SelectionMode="Extended" SelectionChanged="OnSelectionChanged">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Property" Binding="{Binding Name}" Width="*" />
+                <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="90" />
+                <DataGridTextColumn Header="Becomes tag" Binding="{Binding SuggestedTag}" Width="2*" />
+                <DataGridTextColumn Header="" Binding="{Binding AlreadyAdded}" Width="80" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</Window>

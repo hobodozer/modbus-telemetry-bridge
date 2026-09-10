@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>ModbusBridge.Core</RootNamespace>
+    <AssemblyName>ModbusBridge.Core</AssemblyName>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compiled into both the bridge and the net48 SimHub plugin, so the two ends of the
+         telemetry wire format cannot drift apart. -->
+    <Compile Include="..\..\shared\TelemetryProtocol.cs" Link="Telemetry\TelemetryProtocol.cs" />
+  </ItemGroup>
+
+</Project>
