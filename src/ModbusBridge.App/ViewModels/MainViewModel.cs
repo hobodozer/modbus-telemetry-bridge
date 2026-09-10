@@ -80,6 +80,17 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<TagRowViewModel> VisibleTags { get; } = new();
     public ObservableCollection<LogRowViewModel> LogRows { get; } = new();
 
+    /// <summary>Operator console: one lamp per mapped vJoy button, one bar per axis.</summary>
+    public ObservableCollection<PanelLampViewModel> PanelLamps { get; } = new();
+    public ObservableCollection<PanelAxisViewModel> PanelAxes { get; } = new();
+
+    private string _panelState = "no vJoy device";
+    public string PanelState
+    {
+        get => _panelState;
+        private set => Set(ref _panelState, value);
+    }
+
     // ---- Commands ----
     public AsyncRelayCommand StartCommand { get; }
     public AsyncRelayCommand StopCommand { get; }
@@ -308,6 +319,8 @@ public sealed class MainViewModel : ObservableObject
 
         VJoyStatuses.Clear();
         foreach (var feeder in _engine.VJoyFeeders) VJoyStatuses.Add(new VJoyStatusViewModel(feeder));
+
+        RebuildPanel();
         Raise(nameof(VJoyDriverStatus));
 
         TelemetryStatuses.Clear();
@@ -324,6 +337,41 @@ public sealed class MainViewModel : ObservableObject
 
     public Brush VJoyDriverBrush => VJoyInterop.IsAvailable ? Brushes.MediumSeaGreen : Brushes.Goldenrod;
 
+    /// <summary>
+    /// Builds the operator console from the vJoy mappings, so the lamps show what the game sees
+    /// rather than what the PLC sent - a mapping mistake then reads as a lamp that never lights.
+    /// </summary>
+    private void RebuildPanel()
+    {
+        PanelLamps.Clear();
+        PanelAxes.Clear();
+
+        var device = Config.VJoy.Devices.FirstOrDefault();
+        if (device is null) { PanelState = "no vJoy device configured"; return; }
+
+        foreach (var button in device.Buttons.Where(b => b.Enabled && !string.IsNullOrWhiteSpace(b.Tag))
+                                             .OrderBy(b => b.Button))
+            PanelLamps.Add(new PanelLampViewModel(button.Button, button.Tag, _engine.Tags.Find(button.Tag)));
+
+        foreach (var axis in device.Axes.Where(a => a.Enabled && !string.IsNullOrWhiteSpace(a.Tag)))
+            PanelAxes.Add(new PanelAxisViewModel(axis, _engine.Tags.Find(axis.Tag)));
+
+        RefreshPanelState();
+    }
+
+    private void RefreshPanelState()
+    {
+        var feeder = _engine.VJoyFeeders.FirstOrDefault();
+        if (feeder is null) { PanelState = "vJoy not running"; return; }
+
+        var profile = string.IsNullOrEmpty(feeder.Statistics.ActiveProfile)
+            ? "none" : feeder.Statistics.ActiveProfile;
+        var layer = string.IsNullOrEmpty(feeder.Statistics.ActiveLayer)
+            ? "base" : feeder.Statistics.ActiveLayer;
+
+        PanelState = $"profile: {profile}    layer: {layer}    {PanelLamps.Count(l => l.IsOn)} pressed";
+    }
+
     private void RefreshLiveData()
     {
         foreach (var device in DeviceStatuses) device.Refresh();
@@ -338,6 +386,10 @@ public sealed class MainViewModel : ObservableObject
         }
 
         foreach (var row in VisibleTags) row.Refresh();
+
+        foreach (var lamp in PanelLamps) lamp.Refresh();
+        foreach (var axis in PanelAxes) axis.Refresh();
+        RefreshPanelState();
     }
 
     private void RebuildTagList()

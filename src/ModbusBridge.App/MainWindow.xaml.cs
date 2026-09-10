@@ -33,6 +33,31 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Self-test support: how many top-level tabs there are.</summary>
+    /// <summary>
+    /// Navigation drives the tab control, which still holds every panel. Keeping the tabs means
+    /// the existing content, bindings and handlers are untouched by the new shell.
+    /// </summary>
+    private void OnNavChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (NavList.SelectedItem is not ListBoxItem item) return;
+        if (item.Tag is not string tag || !int.TryParse(tag, out var index)) return;
+        if (index >= 0 && index < RootTabs.Items.Count) RootTabs.SelectedIndex = index;
+    }
+
+    /// <summary>Keeps the navigation highlight in step when something selects a tab in code.</summary>
+    private void SyncNavToTab()
+    {
+        foreach (var candidate in NavList.Items)
+        {
+            if (candidate is not ListBoxItem item) continue;
+            if (item.Tag is string tag && int.TryParse(tag, out var index) && index == RootTabs.SelectedIndex)
+            {
+                NavList.SelectedItem = item;
+                return;
+            }
+        }
+    }
+
     internal int SelectAllTabsCount() => RootTabs.Items.Count;
 
     /// <summary>
@@ -42,6 +67,7 @@ public partial class MainWindow : Window
     internal string SelectTab(int index)
     {
         RootTabs.SelectedIndex = index;
+        SyncNavToTab();
         RootTabs.UpdateLayout();
 
         // Walk the nested TabControls too - read/write groups and the watchdog live inside one.
