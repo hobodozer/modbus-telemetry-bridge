@@ -64,6 +64,10 @@ new hat checks, after every change below.
 - `tools/read-tag.ps1` - read a tag **by name**. Resolves the address from the config, reads
   it, decodes it and applies the scaling. Checking one value used to be three manual steps,
   and getting the scaling step wrong looks exactly like a dead data source.
+- `src/ModbusBridge.Cli` - headless host. Same `BridgeEngine`, no WPF, plain net8.0. Verified
+  against the live rig: PLC connected, HMI server listening, vJoy acquired, 425 tags. This is
+  what makes "runs off Windows" testable at all; **it is not a substitute for the GUI** -
+  configuring a 317-point map by hand would be unusable. A cross-platform GUI is still open.
 - `tools/health.ps1` - the whole chain in one command, read out of the bridge's own status
   registers: process, server reachable, HMI attached, telemetry age, game, host statistics.
   Addresses come from the config, so regenerating the map does not break it.

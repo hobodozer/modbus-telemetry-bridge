@@ -8,6 +8,10 @@
 
 # Windows shells care. Checking these out with LF breaks them on some hosts.
 *.ps1   text eol=crlf
+
+# POSIX shells care in the other direction: a script with CRLF fails with "bad interpreter",
+# which is a confusing way to learn that a file was checked out on Windows.
+*.sh    text eol=lf
 *.cmd   text eol=crlf
 *.bat   text eol=crlf
 

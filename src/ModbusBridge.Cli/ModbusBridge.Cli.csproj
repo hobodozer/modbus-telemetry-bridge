@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Plain net8.0 on purpose: this is the host that lets the bridge run where WPF cannot. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>modbusbridge</AssemblyName>
+    <RootNamespace>ModbusBridge.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ModbusBridge.Core\ModbusBridge.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,12 @@
+{
+  "solution": {
+    "path": "ModbusBridge.sln",
+    "projects": [
+      "src\\ModbusBridge.Core\\ModbusBridge.Core.csproj",
+      "src\\ModbusBridge.Cli\\ModbusBridge.Cli.csproj",
+      "tests\\ModbusBridge.SmokeTest\\ModbusBridge.SmokeTest.csproj",
+      "tools\\simhub-catalog\\SimHubCatalog.csproj",
+      "tools\\store-probe\\StoreProbe.csproj"
+    ]
+  }
+}

@@ -569,7 +569,8 @@ src/ModbusBridge.Core/        Engine, protocol, config - no UI dependencies
   Outputs/VJoy/               vJoy interop, device wrapper, feeder, shift layers, profiles
   Outputs/Keyboard/           Key spec parser, macro runner, SendInput sink
   Inputs/                     SimHub telemetry ingest, host statistics, GPU counters, CSV replay
-src/ModbusBridge.App/         WPF desktop app + tray icon
+src/ModbusBridge.App/         WPF desktop app + tray icon (Windows only)
+src/ModbusBridge.Cli/         Headless host - same engine, no GUI, runs anywhere
 plugin/                       SimHub plugin (net48, outside the solution)
 shared/TelemetryProtocol.cs   Wire format, compiled into BOTH the bridge and the plugin
 tests/ModbusBridge.SmokeTest/ End-to-end test with no PLC hardware
@@ -584,7 +585,9 @@ tools/read-tag.ps1            Read a tag BY NAME - resolves address, decodes, ap
 tools/health.ps1              Whole-chain health from the bridge's own status registers
 tools/code-map.py             Outline a C# file: types and members with line numbers
 tools/tia/                    Read a Siemens TIA Portal project through the Openness API
-build.ps1                     Build, test, publish
+ModbusBridge.CrossPlatform.slnf   Everything except the WPF app
+build.ps1                     Build, test, publish (Windows)
+build.sh                      Build and test the cross-platform half (POSIX sh, no pwsh needed)
 rig.ps1                       Task runner: status, build, test, read, capture, log
 install-simhub-plugin.ps1     Build and install the SimHub plugin
 ```

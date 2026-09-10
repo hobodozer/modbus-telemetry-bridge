@@ -29,6 +29,8 @@ Prefer these to improvising - each replaces work that was being redone by hand.
 .\rig.ps1 probe                  # server data store: read scaling + write masking
 .\rig.ps1 build | start | stop | restart | log | read | map | capture | scan
 .\build.ps1                      # check + build + smoke test + probe + UI self-test
+./build.sh                       # the same, minus the WPF app - POSIX sh, no pwsh needed
+dotnet run --project src\ModbusBridge.Cli -- --data .\rig    # headless host, runs anywhere
 
 python tools\config-query.py <cfg> <cmd>      # same as 'rig config', any config file
 python tools\code-map.py --grep <member>      # where is this declared?
@@ -85,7 +87,8 @@ not restart it - `.\rig.ps1 build` does both.
   hand-roll the regex, the obvious one omits `\x0d`.
 - **This must compile on any Windows machine, and on Linux barring a rewrite.** Only the WPF
   app may be Windows-pinned - everything else is plain `net8.0`, with the P/Invoke guarded at
-  runtime. `git`, `python`, `pwsh`, SimHub and vJoy are all optional to a build. Windows ships
+  runtime. `ModbusBridge.CrossPlatform.slnf` builds everything but the GUI;
+  `src/ModbusBridge.Cli` runs the engine headless. `git`, `python`, `pwsh`, SimHub and vJoy are all optional to a build. Windows ships
   PowerShell 5.1 and not `pwsh`, so scripts must parse under 5.1.
 - **A passing local build says nothing about anyone else's machine.** Every portability breach
   here was found by a stranger's build failing, never by testing. `.\rig.ps1 check` covers the
