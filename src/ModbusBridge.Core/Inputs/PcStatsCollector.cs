@@ -32,6 +32,8 @@ public sealed class PcStatsCollector : IAsyncDisposable
     private long _prevRxBytes, _prevTxBytes, _prevNetTicks;
     private bool _haveNetBaseline;
 
+    private readonly GpuCounter _gpu = new();
+
     // Enumerating every process is comparatively expensive; do it rarely.
     private long _lastProcessCountTicks;
     private double _lastProcessCount;
@@ -70,6 +72,7 @@ public sealed class PcStatsCollector : IAsyncDisposable
         _cts.Dispose();
         _cts = null;
         _loop = null;
+        _gpu.Dispose();
         Log.Info("pcstats", "Stopped.");
     }
 
@@ -96,6 +99,7 @@ public sealed class PcStatsCollector : IAsyncDisposable
         Set("logicalCpus", Environment.ProcessorCount);
 
         SampleCpu();
+        SampleGpu();
         SampleMemory();
         SampleDisk();
         SampleNetwork();
@@ -123,6 +127,13 @@ public sealed class PcStatsCollector : IAsyncDisposable
         _prevKernel = kernelTicks;
         _prevUser = userTicks;
         _haveCpuBaseline = true;
+    }
+
+    private void SampleGpu()
+    {
+        // Null while the counter is priming or unavailable - leave the tag untouched rather than
+        // publishing a confident zero, which on a gauge is indistinguishable from an idle GPU.
+        if (_gpu.Sample() is { } percent) Set("gpuPercent", percent);
     }
 
     private void SampleMemory()
