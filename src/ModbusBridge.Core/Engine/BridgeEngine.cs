@@ -2,6 +2,7 @@ using System.Net;
 using ModbusBridge.Core.Config;
 using ModbusBridge.Core.Diagnostics;
 using ModbusBridge.Core.Inputs;
+using ModbusBridge.Core.Outputs.Keyboard;
 using ModbusBridge.Core.Modbus;
 using ModbusBridge.Core.Outputs.VJoy;
 using ModbusBridge.Core.Simulation;
@@ -46,6 +47,7 @@ public sealed class BridgeEngine : IAsyncDisposable
     private TelemetrySimulator? _simulator;
     private PcStatsCollector? _pcStats;
     private readonly List<DerivedRuntime> _derived = new();
+    private KeyboardFeeder? _keyboard;
     private TagRecorder? _recorder;
     private TagReplayer? _replayer;
     private ModbusTcpServer? _virtualPlc;
@@ -69,6 +71,7 @@ public sealed class BridgeEngine : IAsyncDisposable
     public TelemetryIngestServer? Telemetry => _telemetry;
     public TelemetrySimulator? Simulator => _simulator;
     public PcStatsCollector? PcStats => _pcStats;
+    public KeyboardFeeder? Keyboard => _keyboard;
     public TagRecorder? Recorder => _recorder;
     public TagReplayer? Replayer => _replayer;
 
@@ -202,6 +205,12 @@ public sealed class BridgeEngine : IAsyncDisposable
         {
             _recorder = new TagRecorder(Config.Recording, Tags);
             _recorder.Start();
+        }
+
+        if (Config.Keyboard.Enabled)
+        {
+            _keyboard = new KeyboardFeeder(Config.Keyboard, Tags);
+            _keyboard.Start();
         }
 
         if (Config.PcStats.Enabled)
@@ -422,6 +431,12 @@ public sealed class BridgeEngine : IAsyncDisposable
             {
                 await _pcStats.StopAsync().ConfigureAwait(false);
                 _pcStats = null;
+            }
+
+            if (_keyboard is not null)
+            {
+                await _keyboard.StopAsync().ConfigureAwait(false);
+                _keyboard = null;
             }
 
             if (_recorder is not null)

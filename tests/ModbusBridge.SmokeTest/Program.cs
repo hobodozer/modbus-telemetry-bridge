@@ -147,6 +147,71 @@ internal static class Program
         await VJoyEndToEndChecks.RunAsync(engine, Check, Section, Note);
         await TelemetryChecks.RunAsync(engine, TelemetryPort, Check, Section, Note);
 
+        Section("Keyboard output");
+        {
+            // Everything here runs against a recording sink. Nothing is ever typed into the
+            // desktop, which is also why DryRun defaults to on in the shipped config.
+            var spec = ModbusBridge.Core.Outputs.Keyboard.KeySpec.ParseKey("ctrl+shift+f4");
+            Check(spec.VirtualKey == 0x73 && spec.Ctrl && spec.Shift && !spec.Alt,
+                  $"parsed '{spec}' to F4 with ctrl and shift");
+            Check(ModbusBridge.Core.Outputs.Keyboard.KeySpec.ParseKey("a").VirtualKey == 'A',
+                  "a bare letter maps to its virtual key");
+            Check(ModbusBridge.Core.Outputs.Keyboard.KeySpec.ParseKey("left").VirtualKey == 0x25,
+                  "named keys resolve");
+
+            var sequence = ModbusBridge.Core.Outputs.Keyboard.KeySpec.ParseSequence("ctrl+s, wait 250, enter");
+            Check(sequence.Count == 3 && sequence[1].Key is null && sequence[1].DelayMs == 250,
+                  "a sequence parses keys and waits");
+
+            Check(!ModbusBridge.Core.Outputs.Keyboard.KeySpec.TryParseSequence("ctrl+nope", out _, out var bad)
+                  && bad is not null, "an unknown key is rejected with a message");
+
+            var sink = new ModbusBridge.Core.Outputs.Keyboard.DryRunKeySink(log: false);
+            var keyboard = new KeyboardConfig
+            {
+                Enabled = true, DryRun = true, UpdateIntervalMs = 10, KeyPressMs = 5, KeyGapMs = 5
+            };
+            keyboard.Mappings.Add(new KeyMapping { Tag = "key.hold", Keys = "f1", Mode = KeyMode.Hold });
+            keyboard.Mappings.Add(new KeyMapping { Tag = "key.tap", Keys = "ctrl+s", Mode = KeyMode.Tap });
+            keyboard.Mappings.Add(new KeyMapping { Tag = "key.bad", Keys = "ctrl+nope", Mode = KeyMode.Tap });
+
+            var feeder = new ModbusBridge.Core.Outputs.Keyboard.KeyboardFeeder(keyboard, engine.Tags, sink);
+            var hold = engine.Tags.GetOrAdd("key.hold");
+            var tap = engine.Tags.GetOrAdd("key.tap");
+            hold.Set(ModbusBridge.Core.Tags.TagValue.Good(false), "test");
+            tap.Set(ModbusBridge.Core.Tags.TagValue.Good(false), "test");
+
+            feeder.Start();
+            Check(feeder.Warnings.Count == 1, $"the bad mapping was reported and skipped (got {feeder.Warnings.Count})");
+            await Task.Delay(60);
+
+            hold.Set(ModbusBridge.Core.Tags.TagValue.Good(true), "test");
+            await Task.Delay(80);
+            Check(sink.Sent.Any(x => x == "down f1"), "hold pressed f1");
+            Check(!sink.Sent.Any(x => x == "up f1"), "hold keeps f1 down while the tag is true");
+
+            hold.Set(ModbusBridge.Core.Tags.TagValue.Good(false), "test");
+            await Task.Delay(80);
+            Check(sink.Sent.Any(x => x == "up f1"), "hold released f1 when the tag went false");
+
+            sink.Sent.Clear();
+            tap.Set(ModbusBridge.Core.Tags.TagValue.Good(true), "test");
+            await Task.Delay(120);
+            Check(sink.Sent.Contains("down ctrl") && sink.Sent.Contains("down s")
+                  && sink.Sent.Contains("up s") && sink.Sent.Contains("up ctrl"),
+                  "tap sent the whole chord, modifiers around the key");
+
+            // A key held while its tag goes bad is the stuck-key case.
+            sink.Sent.Clear();
+            hold.Set(ModbusBridge.Core.Tags.TagValue.Good(true), "test");
+            await Task.Delay(80);
+            hold.DemoteQuality(ModbusBridge.Core.Data.TagQuality.Bad);
+            await Task.Delay(80);
+            Check(sink.Sent.Any(x => x == "up f1"), "a key held on a tag that goes bad is released");
+
+            await feeder.StopAsync();
+        }
+
         Section("CSV record and replay");
         {
             var recordDir = Path.Combine(Path.GetTempPath(), "mbbridge-record-" + Guid.NewGuid().ToString("N")[..8]);

@@ -378,6 +378,41 @@ Everything comes from the BCL or two kernel32 calls, so the published executable
 no-third-party-dependency property. GPU load is the exception and is not collected: it needs
 performance counters, which would mean a package.
 
+## Keyboard output
+
+For games that ignore joystick input for certain functions. Any tag can press a key.
+
+```jsonc
+"keyboard": {
+  "enabled": true,
+  "dryRun": true,                 // logs keystrokes instead of sending them - see below
+  "mappings": [
+    { "tag": "plc1.di.lights",  "keys": "l",            "mode": "hold" },
+    { "tag": "plc1.di.hazards", "keys": "ctrl+shift+h", "mode": "tap"  },
+    { "tag": "plc1.di.startup", "keys": "e, wait 500, y", "mode": "macro" }
+  ]
+}
+```
+
+| `mode` | Behaviour |
+| --- | --- |
+| `hold` | Key held for exactly as long as the tag is true. One key, not a sequence. |
+| `tap` | Press and release on each rising edge. `repeatMs` repeats while held. |
+| `macro` | Runs a sequence once per rising edge. `wait <ms>` pauses between steps. |
+
+Keys are written the way you would say them: `f1`, `ctrl+shift+p`, `left`, `numpad5`, `escape`.
+A mapping that will not parse is reported and skipped rather than stopping the others.
+
+> **`dryRun` defaults to true, deliberately.** This types into whichever window has focus, which
+> during setup is your configuration UI rather than the game. Leave it on until the mappings read
+> correctly in the log, then turn it off with the game focused.
+
+Keystrokes are sent as **scan codes**, not virtual keys, because many games read the keyboard
+through DirectInput and ignore virtual-key-only injection entirely.
+
+Anything still held is released when the engine stops, and a key held on a tag that goes bad is
+released too - a stuck key outlives the process that pressed it.
+
 ## Recording and replay
 
 Captures tags to CSV and plays them back, so an HMI screen, a vJoy mapping or a register map can be
@@ -589,7 +624,6 @@ The UI self-test (`--selftest`) walks every tab and fails the build on any WPF b
 
 ## Not yet built
 
-- **Keyboard / macro output** - for games that ignore joystick input for certain functions.
 - **GPU utilisation** - the host statistics collector uses only the BCL and two kernel32 calls to
   keep the published executable dependency-free, and GPU load needs performance counters.
 - **Chunked telemetry schema.** The property catalogue is chunked across datagrams; the schema is

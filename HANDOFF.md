@@ -39,7 +39,9 @@ new hat checks, after every change below.
 - Four-contact and **discrete** vJoy hats (`VJoyPovSource`, `VJoyPovKind`, `SetDiscretePov`).
 - vJoy **shift layers** - a modifier contact remaps buttons while held.
 - vJoy **per-game profiles**, composing with layers; also gate axes and hats.
-- **Derived tags**, a **network scanner**, and **CSV record/replay**.
+- **Derived tags**, a **network scanner**, **CSV record/replay** and **keyboard output**.
+  Keyboard output ships with `dryRun` on; it has never been run for real, only against a
+  recording sink.
   The device here has 0 continuous + 1 discrete POV, so hats could not have worked before.
 - Learn dialog (vJoy tab) and output test panel (Devices tab).
 - Theme fixes: `ComboBox` retemplated, styles for `ToolTip`/`ComboBoxItem`/`ContextMenu`/`MenuItem`.
