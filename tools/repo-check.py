@@ -7,8 +7,12 @@ of them need the rig running, a PLC, or a network - it is all static, and it tak
     python tools/repo-check.py           # report, exit non-zero on a failure
     python tools/repo-check.py --quiet   # only failures
     python tools/repo-check.py --list    # what is checked, and why it is checked
+    python tools/repo-check.py --self-test
 
 Run it before pushing. `rig.ps1 check` and `build.ps1` both call it.
+
+Works without git: unpacked from a ZIP, or on a machine with no git on PATH, file
+enumeration falls back to walking the tree and only the gitignore check is skipped.
 """
 
 import argparse
@@ -69,14 +73,60 @@ class Report:
 
 
 def git(*args):
-    out = subprocess.run(["git", "-C", ROOT] + list(args), capture_output=True, text=True)
+    """Runs git, or returns [] if that is not possible.
+
+    Both failure modes are real and were hit within a day of this file being written: a ZIP
+    download from GitHub has no .git at all, and a machine without git on PATH raises
+    FileNotFoundError from CreateProcess rather than returning non-zero.
+    """
+    try:
+        out = subprocess.run(["git", "-C", ROOT] + list(args), capture_output=True, text=True)
+    except (FileNotFoundError, OSError):
+        return []
     if out.returncode != 0:
         return []
     return [line for line in out.stdout.splitlines() if line]
 
 
+def have_git_checkout():
+    """True only if git runs AND this directory is inside a work tree."""
+    return git("rev-parse", "--is-inside-work-tree") == ["true"]
+
+
+IN_CHECKOUT = have_git_checkout()
+
+# Directories never worth walking. Only consulted on the filesystem fallback; inside a checkout,
+# git's own ignore rules do this job properly.
+SKIP_DIRS = {"bin", "obj", ".vs", ".git", "node_modules", "__pycache__", "publish", "rig",
+             "logs", "recordings", ".idea"}
+
+
+def list_files(suffix=None, prefix=None):
+    """Repo-relative POSIX paths, from git when there is a checkout and the filesystem otherwise.
+
+    The fallback matters: unpacked from a ZIP there is no index, and without it every check that
+    enumerates files silently saw nothing - which made this report "91 problems" on a tree that
+    was in fact fine, because "not tracked by git" is meaningless when nothing is tracked.
+    """
+    if IN_CHECKOUT:
+        paths = git("ls-files")
+    else:
+        paths = []
+        for dirpath, dirnames, filenames in os.walk(ROOT):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            for name in filenames:
+                rel = os.path.relpath(os.path.join(dirpath, name), ROOT)
+                paths.append(rel.replace(os.sep, "/"))
+
+    if suffix:
+        paths = [p for p in paths if p.lower().endswith(suffix)]
+    if prefix:
+        paths = [p for p in paths if p.startswith(prefix)]
+    return sorted(paths)
+
+
 def tracked_text_files():
-    for path in git("ls-files"):
+    for path in list_files():
         if path.lower().endswith(BINARY_SUFFIXES):
             continue
         full = os.path.join(ROOT, path)
@@ -116,7 +166,7 @@ def check_projects_in_solution(report):
 
     missing = []
     exempt = 0
-    for path in git("ls-files", "*.csproj"):
+    for path in list_files(suffix=".csproj"):
         key = path.replace(chr(92), "/").lower()
         if key in referenced:
             continue
@@ -138,6 +188,11 @@ def check_source_not_ignored(report):
     """A .gitignore rule once matched src/ModbusBridge.Core/Config/ and kept nine source files out
     of the repository. Every local build passed; a fresh clone failed with 54 errors."""
     report.check("No source file is excluded by .gitignore")
+    if not IN_CHECKOUT:
+        report.note("skipped - no git checkout here, so 'tracked' and 'ignored' mean nothing")
+        report.note("this is a ZIP download or git is not on PATH; the other checks still ran")
+        return
+
     candidates = []
     for base in SOURCE_DIRS:
         root = os.path.join(ROOT, base)
@@ -184,7 +239,7 @@ def check_tools_documented(report):
     text = open(readme, encoding="utf-8-sig").read()
 
     entries = set()
-    for path in git("ls-files", "tools/*"):
+    for path in list_files(prefix="tools/"):
         parts = path.split("/")
         if len(parts) >= 2 and not parts[1].startswith("__"):
             entries.add("tools/" + parts[1])
@@ -202,7 +257,7 @@ def check_doc_paths_exist(report):
     pattern = re.compile(r"`((?:src|tools|tests|shared|plugin)/[A-Za-z0-9_./-]+)`")
     seen = set()
     missing = []
-    for path in git("ls-files", "*.md"):
+    for path in list_files(suffix=".md"):
         full = os.path.join(ROOT, path)
         with open(full, encoding="utf-8-sig") as handle:
             for line_no, line in enumerate(handle, 1):
@@ -280,7 +335,7 @@ def check_stale_claims(report):
     claims = [(c.label, c.evidence, c.pattern) for c in CLAIMS]
 
     live = {}
-    for path in git("ls-files", "*.md"):
+    for path in list_files(suffix=".md"):
         full = os.path.join(ROOT, path)
         ignoring = False
         kept = []
@@ -367,6 +422,37 @@ def self_test():
             failures += 1
         else:
             print("  ok    " + label)
+
+    print()
+    print("Working without git")
+    # This file assumed a git checkout and broke twice on someone else's machine: unpacked from a
+    # GitHub ZIP it reported 91 imaginary failures ("not tracked by git", on a tree where nothing
+    # is tracked), and where git was not on PATH it died with a FileNotFoundError traceback.
+    global IN_CHECKOUT
+    was = IN_CHECKOUT
+    try:
+        IN_CHECKOUT = False
+        walked = list_files()
+        markdown = list_files(suffix=".md")
+        tools = list_files(prefix="tools/")
+        cases = [
+            ("enumerates files with no index", len(walked) > 20),
+            ("filters by suffix", len(markdown) >= 4 and all(p.endswith(".md") for p in markdown)),
+            ("filters by prefix", len(tools) >= 4 and all(p.startswith("tools/") for p in tools)),
+            ("skips build output", not any("/obj/" in p or "/bin/" in p for p in walked)),
+        ]
+        for label, ok in cases:
+            if ok:
+                print("  ok    " + label)
+            else:
+                print("  FAIL  " + label)
+                failures += 1
+    finally:
+        IN_CHECKOUT = was
+
+    if git("rev-parse", "--is-inside-work-tree") == ["true"] and not was:
+        print("  FAIL  IN_CHECKOUT was not restored")
+        failures += 1
 
     print()
     if failures:

@@ -34,14 +34,23 @@ if (-not $SkipTests) {
     # a source file .gitignore excludes, a project missing from the solution, a command
     # corrupted by an interpreted backslash escape. Run first so it fails fast.
     Step "Checking repository consistency"
-    # The self-test first: a claim pattern that silently stops matching still reports "ok",
-    # which is the one failure mode the checks below cannot survive. It already happened -
-    # a case-sensitive pattern walked past a false trap in CLAUDE.md itself.
-    python tools\repo-check.py --self-test | Select-String -Pattern "FAIL" -Quiet |
-        ForEach-Object { if ($_) { throw "repo-check self-test failed - run: python tools\repo-check.py --self-test" } }
-    python tools\repo-check.py --quiet
-    if ($LASTEXITCODE -ne 0) { throw "repo-check failed - see above." }
-    Write-Host "    repo-check passed." -ForegroundColor Green
+    # repo-check is a nicety, not a build dependency. Someone who downloaded the source to
+    # compile it should not be blocked because Python is absent, so a missing interpreter is
+    # a warning. A check that RUNS and fails is still fatal - that is the whole point of it.
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $python) {
+        Write-Host "    Python not found - skipping repo-check. The build does not need it." -ForegroundColor Yellow
+    }
+    else {
+        # The self-test first: a claim pattern that silently stops matching still reports
+        # "ok", which is the one failure mode the checks below cannot survive. It has
+        # already happened - a case-sensitive pattern walked past a false trap in CLAUDE.md.
+        python tools\repo-check.py --self-test | Select-String -Pattern "FAIL" -Quiet |
+            ForEach-Object { if ($_) { throw "repo-check self-test failed - run: python tools\repo-check.py --self-test" } }
+        python tools\repo-check.py --quiet
+        if ($LASTEXITCODE -ne 0) { throw "repo-check failed - see above." }
+        Write-Host "    repo-check passed." -ForegroundColor Green
+    }
 }
 
 # The running app holds an open handle to its own exe, so the copy step fails with a link
