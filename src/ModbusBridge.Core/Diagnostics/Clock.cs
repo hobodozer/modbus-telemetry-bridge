@@ -46,6 +46,7 @@ public sealed class TimerResolutionScope : IDisposable
     public TimerResolutionScope(uint periodMs = 1)
     {
         _period = periodMs;
+        OptOutOfTimerThrottling();
         try
         {
             _active = TimeBeginPeriod(_period) == 0;
@@ -60,6 +61,62 @@ public sealed class TimerResolutionScope : IDisposable
     }
 
     public bool IsActive => _active;
+
+    /// <summary>
+    /// Tells Windows not to power-throttle this process's timer resolution.
+    ///
+    /// Since Windows 10 2004 timer resolution is per-process, and Windows throttles it for
+    /// processes it considers background - which a bridge running behind a full-screen game
+    /// always is. When that happens timeBeginPeriod is quietly ignored, every wait quantises to
+    /// ~15.6 ms, and the only thing still holding the poll interval is the spin in PreciseDelay.
+    /// Opting out costs nothing and makes the timing independent of which window has focus.
+    /// </summary>
+    private static void OptOutOfTimerThrottling()
+    {
+        try
+        {
+            // ControlMask says which behaviours we are managing; a cleared StateMask bit means
+            // "do not throttle". Setting both would ask for MORE throttling, not less.
+            var state = new ProcessPowerThrottlingState
+            {
+                Version = ProcessPowerThrottlingCurrentVersion,
+                ControlMask = ProcessPowerThrottlingIgnoreTimerResolution,
+                StateMask = 0
+            };
+
+            var ok = SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling,
+                                           ref state, Marshal.SizeOf<ProcessPowerThrottlingState>());
+            if (!ok)
+                Log.Info("clock", "Could not opt out of timer-resolution throttling; " +
+                                  "timing may quantise while this process is in the background.");
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Older Windows has no such throttling to opt out of.
+        }
+        catch (DllNotFoundException) { }
+    }
+
+    private const int ProcessPowerThrottling = 4;
+    private const uint ProcessPowerThrottlingCurrentVersion = 1;
+    private const uint ProcessPowerThrottlingIgnoreTimerResolution = 0x4;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessPowerThrottlingState
+    {
+        public uint Version;
+        public uint ControlMask;
+        public uint StateMask;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetProcessInformation(IntPtr process, int informationClass,
+                                                     ref ProcessPowerThrottlingState information,
+                                                     int informationSize);
 
     public void Dispose()
     {
