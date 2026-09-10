@@ -1,7 +1,7 @@
-# Handoff - state as of 2026-09-09 (late session)
+# Handoff - state as of 2026-09-10
 
 Read `FINDINGS.md` first - especially sections 13-16, which are new and cover the traps that
-cost the most time tonight. This file is only the status summary; `README.md` is user docs.
+cost the most time in the session that produced this. This file is only the status summary; `README.md` is user docs.
 
 ## The rig, as it actually runs now
 
@@ -10,7 +10,7 @@ cost the most time tonight. This file is only the status summary; `README.md` is
             ET 200SP 192.0.2.10 ------+--> vJoy device 1 (60 buttons)
                      (60 DI, 4 AI)
 
-Everything above was verified live on 2026-09-09. Run it with:
+Everything above was verified live on 2026-09-10. Run it with:
 
     .uild.ps1
     src\ModbusBridge.Appin\Release
@@ -32,7 +32,7 @@ new hat checks, after every change below.
 | Host stats | CPU/RAM/disk/network/processes live in registers 0-14 with no game running |
 | FS25 telemetry | scalars, 32-bit times, money, fuel litres all decode correctly in-game |
 
-## Built tonight
+## Built in the 2026-09-09/10 session
 
 - `src/ModbusBridge.Core/Inputs/PcStatsCollector.cs` - host stats, BCL + kernel32 only, no NuGet.
 - `BridgeEngine.PublishBridgeStatus()` - protocol version, connected clients, telemetry age, game code.
