@@ -117,7 +117,7 @@ public sealed class VJoyFeeder : IAsyncDisposable
     private TagEntry? _profileSelector;
 
     /// <summary>Layer/tag pairs, so a base mapping can tell when a layer overrides the same tag.</summary>
-    private readonly HashSet<(string Layer, string Tag)> _overrides = new();
+    private readonly HashSet<(string Layer, string Tag, string Profile)> _overrides = new();
 
     private VJoyDevice? _device;
     private CancellationTokenSource? _cts;
@@ -149,7 +149,8 @@ public sealed class VJoyFeeder : IAsyncDisposable
         {
             _buttons.Add(new ButtonRuntime { Config = mapping, Tag = _bus.GetOrAdd(mapping.Tag) });
             if (!string.IsNullOrWhiteSpace(mapping.Layer))
-                _overrides.Add((mapping.Layer.ToLowerInvariant(), mapping.Tag.ToLowerInvariant()));
+                _overrides.Add((mapping.Layer.ToLowerInvariant(), mapping.Tag.ToLowerInvariant(),
+                                mapping.Profile.ToLowerInvariant()));
         }
 
         if (!string.IsNullOrWhiteSpace(_config.ProfileTag))
@@ -221,7 +222,7 @@ public sealed class VJoyFeeder : IAsyncDisposable
         string.IsNullOrWhiteSpace(mappingProfile)
         || string.Equals(mappingProfile, activeProfile, StringComparison.OrdinalIgnoreCase);
 
-    private bool IsActiveIn(ButtonRuntime button, string activeLayer)
+    private bool IsActiveIn(ButtonRuntime button, string activeLayer, string activeProfile)
     {
         var layer = button.Config.Layer;
 
@@ -229,7 +230,14 @@ public sealed class VJoyFeeder : IAsyncDisposable
             return string.Equals(layer, activeLayer, StringComparison.OrdinalIgnoreCase);
 
         if (activeLayer.Length == 0) return true;
-        return !_overrides.Contains((activeLayer.ToLowerInvariant(), button.Config.Tag.ToLowerInvariant()));
+
+        // Only an override that is itself active can suppress the base mapping. Without the
+        // profile check, a layer mapping belonging to another game would silence the base
+        // mapping while being gated out itself, and the button would do nothing at all.
+        var tag = button.Config.Tag.ToLowerInvariant();
+        var layerKey = activeLayer.ToLowerInvariant();
+        if (_overrides.Contains((layerKey, tag, ""))) return false;
+        return !_overrides.Contains((layerKey, tag, activeProfile.ToLowerInvariant()));
     }
 
     /// <summary>Catches mappings that point at controls the device is not configured for.</summary>
@@ -397,7 +405,8 @@ public sealed class VJoyFeeder : IAsyncDisposable
             var raw = value.Number >= button.Config.Threshold;
             var input = raw ^ button.Config.Invert;
 
-            if (!InProfile(button.Config.Profile, activeProfile) || !IsActiveIn(button, activeLayer))
+            if (!InProfile(button.Config.Profile, activeProfile)
+                || !IsActiveIn(button, activeLayer, activeProfile))
             {
                 // Release rather than leave it stuck, and keep edge tracking current so returning
                 // to this layer does not read as a fresh press. A toggle keeps its latch.

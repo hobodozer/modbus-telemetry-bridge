@@ -59,7 +59,9 @@ public sealed class TagRecorder : IAsyncDisposable
             }
 
             if (i == parts.Length - 1 && !pattern.EndsWith('*'))
-                return name.Length >= index &&
+                // The suffix must begin at or after what the prefix already consumed, or a
+                // pattern like "ab*ab" matches "ab" by counting the same characters twice.
+                return name.Length - part.Length >= index &&
                        name.EndsWith(part, StringComparison.OrdinalIgnoreCase);
 
             var found = name.IndexOf(part, index, StringComparison.OrdinalIgnoreCase);

@@ -148,6 +148,37 @@ internal static class Program
         await VJoyEndToEndChecks.RunAsync(engine, Check, Section, Note);
         await TelemetryChecks.RunAsync(engine, TelemetryPort, Check, Section, Note);
 
+        Section("Bug hunt regressions");
+        {
+            // A pattern whose prefix and suffix overlap must not match a name too short to contain
+            // both. "ab*ab" needs at least four characters.
+            Check(!ModbusBridge.Core.Diagnostics.TagRecorder.Matches("ab*ab", "ab"),
+                  "glob: overlapping prefix and suffix do not match a short name");
+            Check(ModbusBridge.Core.Diagnostics.TagRecorder.Matches("ab*ab", "abxab"),
+                  "glob: the same pattern still matches a long enough name");
+            Check(ModbusBridge.Core.Diagnostics.TagRecorder.Matches("sim.*", "sim.speed"),
+                  "glob: ordinary prefix matching is unaffected");
+
+            // A macro cancelled between press and release must still lift the key.
+            var sink = new ModbusBridge.Core.Outputs.Keyboard.DryRunKeySink(log: false);
+            var cfg = new KeyboardConfig
+            {
+                Enabled = true, DryRun = true, UpdateIntervalMs = 5, KeyPressMs = 400, KeyGapMs = 5
+            };
+            cfg.Mappings.Add(new KeyMapping { Tag = "key.macro", Keys = "f9, wait 50, f10", Mode = KeyMode.Macro });
+
+            var feeder = new ModbusBridge.Core.Outputs.Keyboard.KeyboardFeeder(cfg, engine.Tags, sink);
+            var trigger = engine.Tags.GetOrAdd("key.macro");
+            trigger.Set(ModbusBridge.Core.Tags.TagValue.Good(false), "test");
+            feeder.Start();
+            await Task.Delay(30);
+            trigger.Set(ModbusBridge.Core.Tags.TagValue.Good(true), "test");
+            await Task.Delay(80);                 // inside the 400 ms press of f9
+            Check(sink.Sent.Contains("down f9"), "macro pressed the first key");
+            await feeder.StopAsync();             // cancel mid-press
+            Check(sink.Sent.Contains("up f9"), "macro released its key when stopped mid-press");
+        }
+
         Section("Telemetry schema chunking");
         {
             // Property names of the size the FS25 component array actually uses, enough of them to

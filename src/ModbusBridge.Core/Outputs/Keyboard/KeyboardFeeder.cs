@@ -192,10 +192,20 @@ public sealed class KeyboardFeeder : IAsyncDisposable
 
             if (step.Key is { } stroke)
             {
+                // The release must happen even if the wait is cancelled, or stopping the engine
+                // mid-macro leaves the key physically down - and it outlives this process.
                 PressKeystroke(stroke);
-                await Task.Delay(Math.Max(1, _config.KeyPressMs), ct).ConfigureAwait(false);
-                ReleaseKeystroke(stroke);
-                await Task.Delay(Math.Max(1, _config.KeyGapMs), ct).ConfigureAwait(false);
+                try
+                {
+                    await Task.Delay(Math.Max(1, _config.KeyPressMs), ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    ReleaseKeystroke(stroke);
+                }
+
+                try { await Task.Delay(Math.Max(1, _config.KeyGapMs), ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
             }
             else if (step.DelayMs > 0)
             {
