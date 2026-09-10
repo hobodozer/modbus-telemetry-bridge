@@ -20,7 +20,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('status', 'build', 'test', 'start', 'stop', 'restart', 'read', 'map', 'capture', 'log')]
+    [ValidateSet('status', 'build', 'test', 'start', 'stop', 'restart', 'read', 'map', 'capture', 'log', 'scan')]
     [string]$Task = 'status',
     [Parameter(Position = 1)][string]$A,
     [Parameter(Position = 2)][string]$B,
@@ -103,6 +103,14 @@ switch ($Task) {
         $req | ForEach-Object { $f = $_ -split "`t"; "{0}|{1}|{2}" -f $f[1], $f[2], $f[3] } |
             Group-Object | Sort-Object { [int](($_.Name -split '\|')[1]) } |
             ForEach-Object { $p = $_.Name -split '\|'; "{0,-5} {1,-6} {2,-6} {3}" -f $p[0], $p[1], $p[2], $_.Count }
+    }
+    'scan' {
+        # The PLC serves one TCP connection, so it will not answer a scan while the bridge is
+        # polling it. Stop the bridge first if it is missing from the results.
+        $scanArgs = @('--scan')
+        if ($A) { $scanArgs += $A }
+        if ($B) { $scanArgs += @('--timeout', $B) }
+        & $exe @scanArgs
     }
     'log' {
         $n = if ($A) { [int]$A } else { 20 }

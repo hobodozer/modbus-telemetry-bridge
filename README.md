@@ -352,6 +352,29 @@ Everything comes from the BCL or two kernel32 calls, so the published executable
 no-third-party-dependency property. GPU load is the exception and is not collected: it needs
 performance counters, which would mean a package.
 
+## Finding devices
+
+Modbus has no discovery: a client is told its address map by configuration and can never ask for
+one. The most that is possible is to find what listens and confirm it speaks the protocol, which
+is what the scanner does - strictly read-only, it never issues a write function code.
+
+```powershell
+.ig.ps1 scan                     # every local subnet
+.ig.ps1 scan 192.0.2.0/24        # a specific range
+.ig.ps1 scan 192.0.2.0/24 150    # with a shorter per-host timeout
+```
+
+A /24 takes under two seconds. For each responder it reports whether the reply was actually Modbus
+(a protocol-identifier check, so a web server on 502 is not mistaken for one), which unit ids
+answer, which of the four areas return data rather than an exception, and the device identification
+string if FC 43/14 is implemented - many devices do not implement it, so its absence proves nothing.
+
+Add `--units` to sweep unit ids 1-247 on each responder, which is much slower but finds gateways
+presenting several devices behind one address.
+
+> A Siemens `MB_SERVER` instance serves exactly one TCP connection. While the bridge is polling a
+> PLC, that PLC will not answer a scan at all - stop the bridge first, or it looks absent.
+
 ## Command-line tools
 
 ```powershell
@@ -511,4 +534,4 @@ The UI self-test (`--selftest`) walks every tab and fails the build on any WPF b
   keep the published executable dependency-free, and GPU load needs performance counters.
 - **Chunked telemetry schema.** The property catalogue is chunked across datagrams; the schema is
   not, which caps a subscription at roughly 900 properties.
-- Network scanner, CSV record/replay, per-game profile switching, run-as-service.
+- CSV record/replay, per-game profile switching, run-as-service.

@@ -147,6 +147,31 @@ internal static class Program
         await VJoyEndToEndChecks.RunAsync(engine, Check, Section, Note);
         await TelemetryChecks.RunAsync(engine, TelemetryPort, Check, Section, Note);
 
+        Section("Network scanner");
+        {
+            var cidr = ModbusBridge.Core.Modbus.ModbusScanner.ParseCidr("10.1.2.0/30");
+            Check(cidr.Count == 2, $"a /30 expands to 2 usable hosts (got {cidr.Count})");
+            Check(cidr[0].ToString() == "10.1.2.1", $"network address is skipped (first is {cidr[0]})");
+
+            var single = ModbusBridge.Core.Modbus.ModbusScanner.ParseCidr("10.1.2.7");
+            Check(single.Count == 1 && single[0].ToString() == "10.1.2.7", "a bare address expands to itself");
+
+            // The scanner should find this test's own server, and report which areas are mapped.
+            var self = new[] { System.Net.IPAddress.Loopback };
+            var found = await ModbusBridge.Core.Modbus.ModbusScanner.ScanAsync(
+                self, HmiServerPort, timeoutMs: 500);
+            Check(found.Count == 1 && found[0].SpeaksModbus,
+                  $"scan found the test server on port {HmiServerPort}");
+            Check(found.Count == 1 && found[0].UnitIds.Contains((byte)1), "scan reported unit id 1");
+            Check(found.Count == 1 && found[0].ReadableAreas is not null,
+                  $"scan reported readable areas: {(found.Count == 1 ? found[0].ReadableAreas : "none")}");
+
+            // A port with nothing on it must stay silent rather than reporting a phantom device.
+            var quiet = await ModbusBridge.Core.Modbus.ModbusScanner.ScanAsync(
+                self, HmiServerPort + 7, timeoutMs: 300);
+            Check(quiet.Count == 0, "a closed port yields no result");
+        }
+
         Section("Derived tag expressions");
         {
             double Tags(string name) => name switch

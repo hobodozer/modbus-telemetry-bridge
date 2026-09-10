@@ -4,6 +4,7 @@ using ModbusBridge.App.Diagnostics;
 using ModbusBridge.App.ViewModels;
 using ModbusBridge.Core.Config;
 using ModbusBridge.Core.Diagnostics;
+using ModbusBridge.Core.Modbus;
 
 namespace ModbusBridge.App;
 
@@ -24,6 +25,14 @@ public partial class App : Application
                             MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
+
+        // Headless scan, so finding devices does not require the GUI - useful over a remote
+        // session and scriptable from rig.ps1.
+        if (e.Args.Any(a => a.Equals("--scan", StringComparison.OrdinalIgnoreCase)))
+        {
+            _ = RunScanAsync(e.Args);
+            return;
+        }
 
         var dataDirectory = ResolveDataDirectory(e.Args);
         var configPath = ResolveConfigPath(e.Args, dataDirectory);
@@ -83,6 +92,56 @@ public partial class App : Application
             _ = _viewModel.StartAsync();
 
         if (selfTest) _ = RunSelfTestAsync(window);
+    }
+
+    /// <summary>
+    /// Scans for Modbus TCP servers and exits. Read-only: it never issues a write function code.
+    /// </summary>
+    private async Task RunScanAsync(string[] args)
+    {
+        static string? ValueOf(string[] args, string name)
+        {
+            var i = Array.FindIndex(args, a => a.Equals(name, StringComparison.OrdinalIgnoreCase));
+            return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+        }
+
+        var target = ValueOf(args, "--scan");
+        var port = int.TryParse(ValueOf(args, "--port"), out var p) ? p : 502;
+        var timeout = int.TryParse(ValueOf(args, "--timeout"), out var t) ? t : 400;
+        var units = args.Any(a => a.Equals("--units", StringComparison.OrdinalIgnoreCase));
+
+        List<System.Net.IPAddress> targets;
+        try
+        {
+            targets = string.IsNullOrWhiteSpace(target) || target.StartsWith("--")
+                ? ModbusScanner.LocalSubnetTargets()
+                : ModbusScanner.ParseCidr(target);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Could not read the scan target: {ex.Message}");
+            Shutdown(2);
+            return;
+        }
+
+        Console.WriteLine($"Scanning {targets.Count} address(es) on port {port}, {timeout} ms timeout...");
+        if (units) Console.WriteLine("Probing unit ids 1-247 on each responder; this is slower.");
+
+        var found = 0;
+        var progress = new Progress<ScanResult>(r =>
+        {
+            found++;
+            var areas = r.ReadableAreas is null ? "" : $"  areas: {r.ReadableAreas}";
+            var ids = r.UnitIds.Count > 0 ? $"  unit(s): {string.Join(",", r.UnitIds)}" : "";
+            Console.WriteLine($"  {r}{ids}{areas}");
+        });
+
+        var results = await ModbusScanner.ScanAsync(targets, port, timeout,
+                                                    scanUnitIds: units, progress: progress);
+
+        var speaking = results.Count(r => r.SpeaksModbus);
+        Console.WriteLine($"Done. {results.Count} listening, {speaking} speaking Modbus.");
+        Shutdown(speaking > 0 ? 0 : 1);
     }
 
     /// <summary>Cycles every tab, waits for data to flow, then exits non-zero if bindings failed.</summary>
