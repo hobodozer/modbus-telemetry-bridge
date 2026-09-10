@@ -13,15 +13,23 @@
     .\rig.ps1 start / stop / restart
     .\rig.ps1 read 200 67            # holding registers, non-zero only
     .\rig.ps1 read 144 16 string
+    .\rig.ps1 tag fs.fuelLevel         # read a tag BY NAME - address, decode and scaling
+    .\rig.ps1 config find fuel         # what the config says about a tag or address
+    .\rig.ps1 check                    # repository consistency, no build needed
+    .\rig.ps1 probe                    # server data store: scaling + write-masking
+    .\rig.ps1 outline ServerDataStore  # types and members of a C# file, with line numbers
+    .\rig.ps1 errors 200               # warnings and errors from the newest log
     .\rig.ps1 map 16                 # regenerate the HMI register map
-    .ig.ps1 capture 8              # what the HMI actually asks for, via tshark
-    .ig.ps1 verify-clone           # clone from the remote and build it, clean
+    .\rig.ps1 capture 8              # what the HMI actually asks for, via tshark
+    .\rig.ps1 verify-clone           # clone from the remote and build it, clean
     .\rig.ps1 log 30
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('status', 'build', 'test', 'start', 'stop', 'restart', 'read', 'map', 'capture', 'log', 'scan', 'verify-clone')]
+    [ValidateSet('status', 'build', 'test', 'start', 'stop', 'restart', 'read', 'tag', 'map',
+                 'capture', 'log', 'errors', 'scan', 'check', 'config', 'probe', 'outline',
+                 'verify-clone')]
     [string]$Task = 'status',
     [Parameter(Position = 1)][string]$A,
     [Parameter(Position = 2)][string]$B,
@@ -135,6 +143,35 @@ switch ($Task) {
             Pop-Location
             Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
         }
+    }
+    'check' {
+        python (Join-Path $root 'tools\repo-check.py') @($A, $B | Where-Object { $_ })
+    }
+    'config' {
+        $cmd = if ($A) { $A } else { 'summary' }
+        $call = @((Join-Path $root 'tools\config-query.py'), (Join-Path $data 'config\bridge.json'), $cmd)
+        if ($B) { $call += $B }
+        python @call
+    }
+    'tag' {
+        if (-not $A) { throw "usage: .\rig.ps1 tag <tag-name>" }
+        & pwsh -NoProfile -File (Join-Path $root 'tools\read-tag.ps1') -Tag $A -Config (Join-Path $data 'config\bridge.json')
+    }
+    'probe' {
+        dotnet run --project (Join-Path $root 'tools\store-probe\StoreProbe.csproj') -c Release --nologo -v quiet
+    }
+    'outline' {
+        if (-not $A) { throw "usage: .\rig.ps1 outline <file-or-type-name>" }
+        python (Join-Path $root 'tools\code-map.py') $A
+    }
+    'errors' {
+        # Warnings and errors only. The full log is mostly per-poll noise, and scrolling it
+        # to find the one line that matters is where the time goes.
+        $n = if ($A) { [int]$A } else { 400 }
+        $log = Latest-Log
+        if (-not $log) { 'no log yet'; break }
+        "--- $($log.Name), last $n line(s) ---"
+        Get-Content $log.FullName -Tail $n | Select-String -Pattern '\[(WARN|ERROR|FATAL)' 
     }
     'log' {
         $n = if ($A) { [int]$A } else { 20 }

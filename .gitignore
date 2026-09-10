@@ -19,3 +19,7 @@ publish/
 .claude/settings.local.json
 tools/tia/bin/
 tools/tia/*.log
+
+# Python bytecode. Created by any py_compile or import of a tool under tools/.
+__pycache__/
+*.pyc

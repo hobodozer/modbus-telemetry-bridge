@@ -578,6 +578,10 @@ tools/make-hmi-map.py         Generate a server register map and its SimHub subs
 tools/simhub-catalog/         Dump the SimHub property catalogue to text
 tools/exob-map.py             Extract the address map from a compiled Weintek .exob
 tools/store-probe/            Bench + invariant check for the server data store
+tools/repo-check.py           Static consistency checks; run before pushing
+tools/config-query.py         Read-only queries against a config: find, gaps, blocks, tags
+tools/read-tag.ps1            Read a tag BY NAME - resolves address, decodes, applies scaling
+tools/code-map.py             Outline a C# file: types and members with line numbers
 tools/tia/                    Read a Siemens TIA Portal project through the Openness API
 build.ps1                     Build, test, publish
 rig.ps1                       Task runner: status, build, test, read, capture, log
@@ -600,10 +604,16 @@ Supported function codes: 1, 2, 3, 4, 5, 6, 15, 16, 22 (mask write), 23 (read/wr
 ## Testing
 
 ```powershell
+python tools\repo-check.py                          # static: gitignore, solution, doc drift
 dotnet run --project tests\ModbusBridge.SmokeTest    # engine end-to-end, no hardware
 dotnet run --project tools\store-probe               # server data store: scaling + invariants
-.\build.ps1                                          # both suites
+.\build.ps1                                          # all three, in that order
 ```
+
+`repo-check.py` runs first because it needs no build and catches what a green build cannot: a
+source file `.gitignore` excludes, a project missing from the solution, a command corrupted by
+an interpreted backslash escape, or documentation claiming a shipped feature is unbuilt. Every
+check in it exists because that exact thing already went wrong here.
 
 The smoke test stands up a virtual PLC, a device runner, the HMI-facing server and real Modbus
 clients, then checks the whole chain: polling, NO/NC inversion, scaling, serving, HMI writes landing

@@ -54,6 +54,18 @@ new hat checks, after every change below.
 - `tools/store-probe` - bench and invariant check for `ServerDataStore`. Sweeps map size and
   stale policy and prints a curve, so a cost that scales with the map shows up instead of
   passing. Run it after touching the server read or write path.
+- `tools/repo-check.py` - static consistency checks, no build needed. Every check exists
+  because that thing already went wrong: a `.gitignore` rule hiding source, a project outside
+  the solution, escape-corrupted commands, docs claiming a shipped feature is unbuilt.
+  `build.ps1` runs it first.
+- `tools/config-query.py` - read-only queries against a config. `find` answers "what is at
+  register 200?" and "where does fuel come from?" in one call, across server points, derived
+  tags and SimHub subscriptions. Also `blocks`, `gaps`, `subs`, `tags`, `resolve`.
+- `tools/read-tag.ps1` - read a tag **by name**. Resolves the address from the config, reads
+  it, decodes it and applies the scaling. Checking one value used to be three manual steps,
+  and getting the scaling step wrong looks exactly like a dead data source.
+- `tools/code-map.py` - outline a C# file, or `--grep` for where a member is declared.
+  Reading a 500-line file to find one method was the most repeated waste here.
 
 ## Known gaps - none of these are mysteries, they are unfinished work
 

@@ -223,8 +223,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("config")
     ap.add_argument("--components", type=int, default=16,
-                    help="vehicle components to map; the HMI reserves 100, but each one costs "
-                         "13 subscriptions and the data frame has an 8 KB ceiling")
+                    help="vehicle components to map. The HMI reserves 100 and each one costs "
+                         "13 subscriptions. The old 8 KB single-datagram ceiling is gone - the "
+                         "schema is chunked and MaxDatagram is 60000 - but the plugin must "
+                         "speak wire version 2, so reinstall it before raising this")
     args = ap.parse_args()
 
     points, subs = build(args.components)
@@ -246,6 +248,20 @@ def main():
     print(f"points        : {len(points)}")
     print(f"subscriptions : {len(subs)}")
     print(f"components    : {args.components} (offsets 400..{400 + 16 * args.components - 1})")
+
+    # Mirrors TelemetryProtocol.BuildSchema: HeaderLength(8) + 10 bytes of chunk header per
+    # datagram, then 1 type byte + 2 length bytes + the UTF-8 name for each property. Printed
+    # so raising --components is an informed choice rather than a guess.
+    MAX_DATAGRAM = 60000
+    chunks, used = 1, 8 + 10
+    for s in subs:
+        size = 3 + len(s["property"].encode("utf-8"))
+        if used + size > MAX_DATAGRAM:
+            chunks += 1
+            used = 8 + 10
+        used += size
+    print(f"schema        : {chunks} datagram(s) of {MAX_DATAGRAM} bytes"
+          f"{'' if chunks == 1 else '  <- needs a wire-version-2 plugin'}")
 
 
 if __name__ == "__main__":

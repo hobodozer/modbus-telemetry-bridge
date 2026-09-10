@@ -27,6 +27,14 @@ pwsh -File .\tools\modbus-read.ps1 -Address 200 -Count 67 -NonZero    # read any
 pwsh -File .\tools\modbus-read.ps1 -Address 144 -Count 16 -Type string
 python tools\make-hmi-map.py rig\config\bridge.json --components 16   # regenerate the HMI map
 python tools\exob-map.py project.exob --types NE,AE --csv map.csv     # HMI address map from a compiled .exob
+
+.\rig.ps1 tag fs.fuelLevel      # read a tag BY NAME: address, decode and scaling in one step
+.\rig.ps1 config find fuel      # everything the config says about a tag or address
+.\rig.ps1 config gaps           # addresses a block reserves but no point covers
+.\rig.ps1 outline DeviceRunner  # types and members with line numbers - read a range, not 771 lines
+.\rig.ps1 check                 # repository consistency, no build needed
+.\rig.ps1 errors                # just the warnings and errors from the newest log
+.\rig.ps1 probe                 # server data store: read scaling + write masking
 dotnet run --project tools\simhub-catalog                             # dump SimHub properties (bridge must be STOPPED)
 dotnet run --project tools\store-probe                                # bench + invariant check for ServerDataStore
 ```
@@ -80,7 +88,11 @@ The app locks its own exe - **stop `ModbusBridge` before building** or the copy 
 Not as a chore - as the thing that stops the next session paying to rediscover what this one
 already knows. Stale docs are worse than none, because they are believed.
 
-Every one of these was found rotten and had to be re-derived from the code:
+Every one of these was found rotten and had to be re-derived from the code. They are quoted
+verbatim, so they are fenced off from `tools/repo-check.py` - which would otherwise read the
+quotations as fresh claims and fail on them:
+
+<!-- repo-check: ignore-block -->
 
 - `README.md` said keyboard output, shift layers, the network scanner, derived tags and CSV
   record/replay were "Not started". All five were built and shipping.
@@ -89,7 +101,9 @@ Every one of these was found rotten and had to be re-derived from the code:
 - `FINDINGS.md` section 15 said "the catalog is chunked, the schema is NOT" and quoted a ceiling
   of ~66 components. The schema had been chunked and the ceiling removed.
 - Nine copy-pasteable commands across three files were silently corrupted by interpreted
-  backslash escapes and could not have worked.
+  backslash escapes and could not have worked. Two more hid in `rig.ps1`'s own help text.
+
+<!-- repo-check: end-ignore -->
 
 So, when you finish a change:
 

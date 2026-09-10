@@ -29,6 +29,16 @@ function Step($text) {
     Write-Host "==> $text" -ForegroundColor Cyan
 }
 
+if (-not $SkipTests) {
+    # Static, needs no build, takes about a second, and catches what a green build cannot:
+    # a source file .gitignore excludes, a project missing from the solution, a command
+    # corrupted by an interpreted backslash escape. Run first so it fails fast.
+    Step "Checking repository consistency"
+    python tools\repo-check.py --quiet
+    if ($LASTEXITCODE -ne 0) { throw "repo-check failed - see above." }
+    Write-Host "    repo-check passed." -ForegroundColor Green
+}
+
 Step "Building ($Configuration)"
 dotnet build ModbusBridge.sln -c $Configuration --nologo -v minimal
 if ($LASTEXITCODE -ne 0) { throw "Build failed." }
@@ -53,6 +63,12 @@ if (-not $SkipTests) {
     # Binds loopback ports 15020 and 15502 briefly.
     dotnet run --project tests\ModbusBridge.SmokeTest\ModbusBridge.SmokeTest.csproj -c $Configuration --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "Smoke test failed." }
+
+    Step "Probing the server data store"
+    # Asserts the write-masking invariants and that read cost does not scale with map size.
+    # The smoke test checks behaviour at one size; this is what catches a per-register cost.
+    dotnet run --project tools\store-probe\StoreProbe.csproj -c $Configuration --nologo -v quiet
+    if ($LASTEXITCODE -ne 0) { throw "Store probe failed." }
 
     Step "Running the UI self-test"
     $uiTemp = Join-Path $env:TEMP "mbbridge-selftest-$(Get-Random)"
