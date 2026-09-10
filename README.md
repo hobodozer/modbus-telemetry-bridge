@@ -454,9 +454,9 @@ one. The most that is possible is to find what listens and confirm it speaks the
 is what the scanner does - strictly read-only, it never issues a write function code.
 
 ```powershell
-.ig.ps1 scan                     # every local subnet
-.ig.ps1 scan 192.0.2.0/24        # a specific range
-.ig.ps1 scan 192.0.2.0/24 150    # with a shorter per-host timeout
+.\rig.ps1 scan                     # every local subnet
+.\rig.ps1 scan 192.0.2.0/24        # a specific range
+.\rig.ps1 scan 192.0.2.0/24 150    # with a shorter per-host timeout
 ```
 
 A /24 takes under two seconds. For each responder it reports whether the reply was actually Modbus
@@ -627,7 +627,7 @@ The UI self-test (`--selftest`) walks every tab and fails the build on any WPF b
 To check that what is *committed* builds, rather than what happens to be on disk:
 
 ```powershell
-.ig.ps1 verify-clone
+.\rig.ps1 verify-clone
 ```
 
 That clones from the remote into a temporary directory and builds it. An unanchored `.gitignore`

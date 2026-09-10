@@ -12,10 +12,8 @@ cost the most time in the session that produced this. This file is only the stat
 
 Everything above was verified live on 2026-09-10. Run it with:
 
-    .uild.ps1
-    src\ModbusBridge.Appin\Release
-et8.0-windows\ModbusBridge.exe --data "<repo>
-ig"
+    .\build.ps1
+    src\ModbusBridge.App\bin\Release\net8.0-windows\ModbusBridge.exe --data "<repo>\rig"
 
 `rig\` holds the live config and logs. `build.ps1` was last run **all green**, including the
 new hat checks, after every change below.
@@ -59,7 +57,7 @@ new hat checks, after every change below.
 2. Registers 1, 141, 200, 201, 240, 241 are mapped but nothing computes them; they read 0.
 3. Register 7 (GPU %) - the collector does not gather it. Needs PDH `GPU Engine` counters.
 4. Components are mapped to 16 of the map's 100. The schema is chunked now, so the old ceiling is
-   gone - raise it with `python tools\make-hmi-map.py rig\configridge.json --components 100`.
+   gone - raise it with `python tools\make-hmi-map.py rig\config\bridge.json --components 100`.
    **The installed plugin still speaks wire version 1**, so until it is reinstalled (needs
    elevation and SimHub closed) subscriptions stay capped at one datagram. The bridge logs a
    warning saying so and keeps working meanwhile.

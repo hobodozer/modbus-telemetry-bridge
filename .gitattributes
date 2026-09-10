@@ -1,0 +1,25 @@
+# Line endings are normalised to LF in the repository and checked out native.
+#
+# This is here because two files were once committed with CRLF baked into the blob while
+# core.autocrlf was on. Git then wanted to normalise them on every touch, so any edit to either
+# one produced a whole-file diff and buried the real change. Declaring the intent makes the
+# behaviour the same on every clone regardless of a developer's local autocrlf setting.
+* text=auto
+
+# Windows shells care. Checking these out with LF breaks them on some hosts.
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+
+*.cs      text diff=csharp
+*.csproj  text
+*.sln     text eol=crlf
+*.xaml    text
+*.md      text
+*.py      text
+*.json    text
+
+*.png binary
+*.ico binary
+*.exe binary
+*.dll binary
