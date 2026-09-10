@@ -1,14 +1,21 @@
-﻿bin/
+# Build output
+bin/
 obj/
 publish/
-config/
-logs/
 *.user
-rig/
+
+# Runtime data. These are anchored on purpose: an unanchored "config/" also matched
+# src/ModbusBridge.Core/Config/ and silently kept nine source files out of the repository,
+# so a fresh clone did not build at all.
+/rig/
+/recordings/
+/logs/
+/config/
+
+# Local scratch
 *.bak
 *.bak[0-9]
 *.units
-tools/tia/bin/
 .claude/settings.local.json
+tools/tia/bin/
 tools/tia/*.log
-recordings/
