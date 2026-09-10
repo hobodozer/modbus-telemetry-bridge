@@ -147,6 +147,53 @@ internal static class Program
         await VJoyEndToEndChecks.RunAsync(engine, Check, Section, Note);
         await TelemetryChecks.RunAsync(engine, TelemetryPort, Check, Section, Note);
 
+        Section("Derived tag expressions");
+        {
+            double Tags(string name) => name switch
+            {
+                "a" => 10, "b" => 4, "level" => 1262, "capacity" => 1320, "zero" => 0, _ => 0
+            };
+
+            void Expect(string expression, double expected, string what)
+            {
+                if (!ModbusBridge.Core.Data.Expression.TryParse(expression, out var parsed, out var error))
+                {
+                    Check(false, $"{what}: parse failed - {error}");
+                    return;
+                }
+                var actual = parsed!.Evaluate(Tags);
+                Check(Math.Abs(actual - expected) < 1e-9, $"{what}: {expression} = {actual}");
+            }
+
+            Expect("1 + 2 * 3", 7, "precedence");
+            Expect("(1 + 2) * 3", 9, "parentheses");
+            Expect("-a + 2", -8, "unary minus");
+            Expect("a / b", 2.5, "division");
+            Expect("2 + 3 - 1", 4, "left associativity");
+            Expect("level / capacity * 100", 1262d / 1320d * 100, "the fuel percent case");
+            Expect("clamp(150, 0, 100)", 100, "clamp");
+            Expect("round(2.567, 2)", 2.57, "round to places");
+            Expect("if(a > b, 1, 2)", 1, "conditional");
+            Expect("min(a, b) + max(a, b)", 14, "min and max");
+            Expect("a > b && b > 0", 1, "boolean and");
+            Expect("1e-3 * 1000", 1, "exponent literals");
+
+            // Division by zero yields 0 rather than infinity, so a not-yet-populated tag cannot
+            // put Inf on an HMI gauge.
+            Expect("a / zero", 0, "divide by zero is contained");
+            // Short-circuit: the right side must not be evaluated when the left is false.
+            Expect("zero != 0 && a / zero > 1", 0, "short circuit avoids the divide");
+
+            ModbusBridge.Core.Data.Expression.TryParse("a +", out _, out var incomplete);
+            Check(incomplete is not null, "an incomplete expression is rejected, not thrown");
+            ModbusBridge.Core.Data.Expression.TryParse("bogus(1)", out _, out var unknown);
+            Check(unknown is not null, "an unknown function is rejected");
+
+            ModbusBridge.Core.Data.Expression.TryParse("x.y + z", out var refs, out _);
+            Check(refs is not null && refs.References.Count == 2 && refs.References.Contains("x.y"),
+                  "references are collected for quality checks");
+        }
+
         Section("Address base");
         var modicon = new ModbusServerConfig
         {

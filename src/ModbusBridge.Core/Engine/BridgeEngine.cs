@@ -10,6 +10,16 @@ using ModbusBridge.Core.Tags;
 namespace ModbusBridge.Core.Engine;
 
 /// <summary>A running listener plus the store behind it, so the UI can report both.</summary>
+/// <summary>A derived tag with its expression already compiled and its inputs resolved.</summary>
+internal sealed class DerivedRuntime
+{
+    public required DerivedTagConfig Config { get; init; }
+    public required ModbusBridge.Core.Data.Expression Expression { get; init; }
+    public required TagEntry Target { get; init; }
+    public required TagEntry[] Inputs { get; init; }
+    public required Func<string, double> Lookup { get; init; }
+}
+
 public sealed class ServerInstance
 {
     public required ModbusServerConfig Config { get; init; }
@@ -35,6 +45,7 @@ public sealed class BridgeEngine : IAsyncDisposable
     private TelemetryIngestServer? _telemetry;
     private TelemetrySimulator? _simulator;
     private PcStatsCollector? _pcStats;
+    private readonly List<DerivedRuntime> _derived = new();
     private ModbusTcpServer? _virtualPlc;
     private VirtualPlcStore? _virtualPlcStore;
     private CancellationTokenSource? _housekeepingCts;
@@ -174,6 +185,8 @@ public sealed class BridgeEngine : IAsyncDisposable
 
     private void StartSimulation()
     {
+        BuildDerivedTags();
+
         if (Config.PcStats.Enabled)
         {
             _pcStats = new PcStatsCollector(Config.PcStats, Tags);
@@ -263,37 +276,77 @@ public sealed class BridgeEngine : IAsyncDisposable
         var game = _telemetry?.Statistics.GameName ?? string.Empty;
         Tags.GetOrAdd("bridge.gameCode").Set(TagValue.Good(GameCode(game)), "engine");
 
-        PublishDerivedRatios();
+        PublishDerivedTags();
     }
 
     /// <summary>
-    /// STOPGAP. A handful of values an HMI wants are ratios of two other tags, and SimHub does not
-    /// supply them usefully - its FuelPercent reads 362 for a tank that is 95.6% full. There is no
-    /// derived-tag expression engine yet (see FINDINGS section 10), so these are computed here.
-    ///
-    /// This is a fixed assignment in code, which is exactly what the rest of the design avoids.
-    /// Delete it the moment derived tags become configurable.
+    /// Compiles the configured expressions once. A bad expression is reported and skipped rather
+    /// than failing the start: one mistyped formula should not take the whole bridge down.
     /// </summary>
-    private void PublishDerivedRatios()
+    private void BuildDerivedTags()
     {
-        Percent("fs.fuelLevel", "fs.fuelCapacity", "fs.fuelPercent");
+        _derived.Clear();
+
+        foreach (var config in Config.Derived)
+        {
+            if (!config.Enabled) continue;
+            if (string.IsNullOrWhiteSpace(config.Tag) || string.IsNullOrWhiteSpace(config.Expression))
+                continue;
+
+            if (!ModbusBridge.Core.Data.Expression.TryParse(config.Expression, out var expression, out var error))
+            {
+                Log.Warn("derived", $"'{config.Tag}': {error} Expression: {config.Expression}");
+                continue;
+            }
+
+            var inputs = expression!.References.Select(Tags.GetOrAdd).ToArray();
+            var byName = new Dictionary<string, TagEntry>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < expression.References.Count; i++) byName[expression.References[i]] = inputs[i];
+
+            _derived.Add(new DerivedRuntime
+            {
+                Config = config,
+                Expression = expression,
+                Target = Tags.GetOrAdd(config.Tag),
+                Inputs = inputs,
+                // Resolved up front, so evaluation is a dictionary hit rather than a bus lookup.
+                Lookup = name => byName.TryGetValue(name, out var tag) ? tag.Value.Number : 0d
+            });
+        }
+
+        if (_derived.Count > 0)
+            Log.Info("derived", $"{_derived.Count} derived tag(s) compiled.");
     }
 
-    private void Percent(string numeratorTag, string denominatorTag, string resultTag)
+    /// <summary>
+    /// Evaluates the configured derived tags. Compiled once at start; evaluating here rather than
+    /// on a timer of its own keeps them in step with everything else the housekeeping pass does.
+    /// </summary>
+    private void PublishDerivedTags()
     {
-        var numerator = Tags.Find(numeratorTag);
-        var denominator = Tags.Find(denominatorTag);
-        if (numerator is null || denominator is null) return;
+        foreach (var derived in _derived)
+        {
+            // A value built from a stale input is indistinguishable from a real one on a gauge,
+            // so by default the whole result is withheld unless every input is trustworthy.
+            if (derived.Config.RequireGoodInputs)
+            {
+                var usable = true;
+                foreach (var input in derived.Inputs)
+                {
+                    if (input.Value.Quality >= ModbusBridge.Core.Data.TagQuality.Good) continue;
+                    usable = false;
+                    break;
+                }
+                if (!usable) continue;
+            }
 
-        // Both sides must be trustworthy: a ratio built from a stale or missing value is worse
-        // than no value at all, because it looks like a real reading.
-        if (numerator.Value.Quality < ModbusBridge.Core.Data.TagQuality.Good || denominator.Value.Quality < ModbusBridge.Core.Data.TagQuality.Good) return;
+            double value;
+            try { value = derived.Expression.Evaluate(derived.Lookup); }
+            catch { continue; }
 
-        var divisor = denominator.Value.Number;
-        if (divisor <= 0) return;
-
-        var percent = Math.Clamp(numerator.Value.Number / divisor * 100.0, 0, 100);
-        Tags.GetOrAdd(resultTag).Set(TagValue.Good(percent), "engine");
+            if (double.IsNaN(value) || double.IsInfinity(value)) continue;
+            derived.Target.Set(TagValue.Good(value), "derived");
+        }
     }
 
     /// <summary>Game codes as the HMI's register map defines them.</summary>

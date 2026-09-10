@@ -48,11 +48,9 @@ new hat checks, after every change below.
 
 ## Known gaps - none of these are mysteries, they are unfinished work
 
-1. **Fuel % is fixed but the fix is a stopgap.** `BridgeEngine.PublishDerivedRatios()` computes
-   `fs.fuelPercent` from level/capacity in code, because SimHub's `FuelPercent` is not a
-   percentage for FS25 (it read 362 for a 95.6% tank) and there is no derived-tag expression
-   engine. Verified live at 95.4%. **This is a fixed assignment in code, which the rest of the
-   design deliberately avoids - delete it once derived tags are configurable.**
+1. **Derived tags are configurable now.** `derived` in the config computes a tag from an
+   expression over other tags. Fuel percent, the schema versions and the status-flag bitmask all
+   come from there; the hard-coded stopgap in the engine is gone.
 2. Registers 1, 141, 200, 201, 240, 241 are mapped but nothing computes them; they read 0.
 3. Register 7 (GPU %) - the collector does not gather it. Needs PDH `GPU Engine` counters.
 4. Components mapped to 16 of the map's 100. ~66 is the ceiling before the schema exceeds UDP's

@@ -492,9 +492,6 @@ The UI self-test (`--selftest`) walks every tab and fails the build on any WPF b
 - **Keyboard / macro output** - for games that ignore joystick input for certain functions.
 - **Shift layers** for vJoy buttons, so one physical button can send different vJoy buttons
   depending on a modifier contact.
-- **Derived-tag expressions.** Values that are a function of other tags currently need code. One
-  such value (fuel percent, from level and capacity) is hard-coded in the engine as a stopgap and
-  is marked as such.
 - **GPU utilisation** - the host statistics collector uses only the BCL and two kernel32 calls to
   keep the published executable dependency-free, and GPU load needs performance counters.
 - **Chunked telemetry schema.** The property catalogue is chunked across datagrams; the schema is
