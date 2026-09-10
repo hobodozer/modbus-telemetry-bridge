@@ -317,6 +317,63 @@ internal static class Program
             Check(image[0] == 1234, "and the refused write still changed nothing");
         }
 
+        Section("onChangeOnly records changes, not writes");
+        {
+            // The engine republishes bridge.* and derived tags on every housekeeping pass, value
+            // unchanged. A version-based change test called that a change, so onChangeOnly wrote a
+            // row per interval and saved nothing.
+            var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "bridge-onchange-test");
+            Directory.CreateDirectory(directory);
+            foreach (var stale in Directory.GetFiles(directory)) { try { File.Delete(stale); } catch { } }
+
+            var bus = new ModbusBridge.Core.Tags.TagBus();
+            var constant = bus.GetOrAdd("probe.constant");
+            constant.Set(ModbusBridge.Core.Tags.TagValue.Good(2.20), "engine");
+
+            var recording = new RecordingConfig
+            {
+                Directory = directory, FileName = "constant.csv", IntervalMs = 5, OnChangeOnly = true
+            };
+            recording.Tags.Clear();
+            recording.Tags.Add("probe.*");
+
+            var recorder = new ModbusBridge.Core.Diagnostics.TagRecorder(recording, bus);
+            recorder.Start();
+            for (var i = 0; i < 40; i++)
+            {
+                constant.Set(ModbusBridge.Core.Tags.TagValue.Good(2.20), "engine");   // same value
+                await Task.Delay(5);
+            }
+            await recorder.StopAsync();
+
+            var rows = File.ReadAllLines(System.IO.Path.Combine(directory, "constant.csv")).Length - 1;
+            Check(rows == 1, $"a republished but unchanged value produced one row (got {rows})");
+
+            // ...and a value that really moves is still captured on every step.
+            var moving = bus.GetOrAdd("probe.moving");
+            moving.Set(ModbusBridge.Core.Tags.TagValue.Good(0), "engine");
+            var second = new RecordingConfig
+            {
+                Directory = directory, FileName = "moving.csv", IntervalMs = 5, OnChangeOnly = true
+            };
+            second.Tags.Clear();
+            second.Tags.Add("probe.moving");
+
+            var mover = new ModbusBridge.Core.Diagnostics.TagRecorder(second, bus);
+            mover.Start();
+            for (var i = 1; i <= 15; i++)
+            {
+                moving.Set(ModbusBridge.Core.Tags.TagValue.Good(i), "engine");
+                await Task.Delay(20);
+            }
+            await mover.StopAsync();
+
+            var movedRows = File.ReadAllLines(System.IO.Path.Combine(directory, "moving.csv")).Length - 1;
+            Check(movedRows >= 12, $"15 real changes were still recorded (got {movedRows})");
+
+            try { Directory.Delete(directory, true); } catch { }
+        }
+
         Section("Telemetry schema chunking");
         {
             // Property names of the size the FS25 component array actually uses, enough of them to

@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Net.Sockets;
 using ModbusBridge.Core.Diagnostics;
 
@@ -96,7 +96,9 @@ public sealed class ModbusTcpClient : IDisposable
         var response = await TransactAsync(unitId, pdu, ct).ConfigureAwait(false);
 
         var expectedBytes = (count + 7) / 8;
-        if (response.Length < 2 || response[1] != expectedBytes)
+        // Both halves matter: a device that declares the right byte count but sends a short PDU
+        // would otherwise be indexed past the end of the response.
+        if (response.Length < 2 + expectedBytes || response[1] != expectedBytes)
             throw new InvalidDataException($"Malformed response to function {function:X2}: expected {expectedBytes} data byte(s).");
 
         var result = new bool[count];
@@ -117,7 +119,7 @@ public sealed class ModbusTcpClient : IDisposable
 
         var response = await TransactAsync(unitId, pdu, ct).ConfigureAwait(false);
 
-        if (response.Length < 2 || response[1] != count * 2)
+        if (response.Length < 2 + count * 2 || response[1] != count * 2)
             throw new InvalidDataException($"Malformed response to function {function:X2}: expected {count * 2} data byte(s).");
 
         var result = new ushort[count];

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using ModbusBridge.Core.Config;
 using ModbusBridge.Core.Tags;
@@ -23,7 +23,9 @@ public sealed class TagRecorder : IAsyncDisposable
     private Task? _loop;
     private StreamWriter? _writer;
     private TagEntry[] _tags = Array.Empty<TagEntry>();
-    private long[] _lastVersions = Array.Empty<long>();
+    private string[] _fields = Array.Empty<string>();
+    private string[] _lastFields = Array.Empty<string>();
+    private bool _haveLastRow;
     private long _startTicks;
 
     public string? Path { get; private set; }
@@ -96,7 +98,9 @@ public sealed class TagRecorder : IAsyncDisposable
             : System.IO.Path.Combine(directory, _config.FileName);
 
         _tags = selected;
-        _lastVersions = new long[selected.Length];
+        _fields = new string[selected.Length];
+        _lastFields = new string[selected.Length];
+        _haveLastRow = false;
         _writer = new StreamWriter(Path, append: false, Encoding.UTF8);
 
         // Elapsed milliseconds rather than wall-clock: replay only needs relative timing, and it
@@ -162,29 +166,40 @@ public sealed class TagRecorder : IAsyncDisposable
     {
         if (_writer is null) return;
 
-        if (_config.OnChangeOnly)
+        // Format first, then compare what would actually be written. Comparing tag versions looked
+        // right but was not: a version is bumped on every accepted write, including one that
+        // republishes the value the tag already held - which is exactly what the engine does with
+        // bridge.* and the derived tags on every housekeeping pass. Any recording whose pattern
+        // reached one of those got a row per interval, so onChangeOnly did nothing at all.
+        for (var i = 0; i < _tags.Length; i++)
+        {
+            var value = _tags[i].Value;
+            _fields[i] = value.Text is not null
+                ? Escape(value.Text)
+                : value.Number.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        if (_config.OnChangeOnly && _haveLastRow)
         {
             var moved = false;
-            for (var i = 0; i < _tags.Length; i++)
+            for (var i = 0; i < _fields.Length; i++)
             {
-                if (_tags[i].Version == _lastVersions[i]) continue;
+                if (string.Equals(_fields[i], _lastFields[i], StringComparison.Ordinal)) continue;
                 moved = true;
                 break;
             }
             if (!moved) return;
         }
 
-        for (var i = 0; i < _tags.Length; i++) _lastVersions[i] = _tags[i].Version;
+        Array.Copy(_fields, _lastFields, _fields.Length);
+        _haveLastRow = true;
 
         _writer.Write(Clock.MsSince(_startTicks).ToString("0", CultureInfo.InvariantCulture));
 
-        foreach (var tag in _tags)
+        foreach (var field in _fields)
         {
             _writer.Write(',');
-            var value = tag.Value;
-            _writer.Write(value.Text is not null
-                ? Escape(value.Text ?? "")
-                : value.Number.ToString("R", CultureInfo.InvariantCulture));
+            _writer.Write(field);
         }
 
         _writer.Write('\n');
