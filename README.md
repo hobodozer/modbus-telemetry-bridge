@@ -620,6 +620,20 @@ or every device is busy, these checks skip with a note rather than failing.
 
 The UI self-test (`--selftest`) walks every tab and fails the build on any WPF binding error.
 
+> **The smoke test needs the hardware to itself.** It acquires vJoy device 1 and binds loopback
+> ports, so it fails while a bridge is already running - which looks like a broken test rather
+> than a busy device. Stop the bridge first.
+
+To check that what is *committed* builds, rather than what happens to be on disk:
+
+```powershell
+.ig.ps1 verify-clone
+```
+
+That clones from the remote into a temporary directory and builds it. An unanchored `.gitignore`
+rule once kept an entire source directory out of the repository while every local build still
+passed, so it is worth running before trusting a push.
+
 ---
 
 ## Not yet built

@@ -14,13 +14,14 @@
     .\rig.ps1 read 200 67            # holding registers, non-zero only
     .\rig.ps1 read 144 16 string
     .\rig.ps1 map 16                 # regenerate the HMI register map
-    .\rig.ps1 capture 8              # what the HMI actually asks for, via tshark
+    .ig.ps1 capture 8              # what the HMI actually asks for, via tshark
+    .ig.ps1 verify-clone           # clone from the remote and build it, clean
     .\rig.ps1 log 30
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('status', 'build', 'test', 'start', 'stop', 'restart', 'read', 'map', 'capture', 'log', 'scan')]
+    [ValidateSet('status', 'build', 'test', 'start', 'stop', 'restart', 'read', 'map', 'capture', 'log', 'scan', 'verify-clone')]
     [string]$Task = 'status',
     [Parameter(Position = 1)][string]$A,
     [Parameter(Position = 2)][string]$B,
@@ -111,6 +112,29 @@ switch ($Task) {
         if ($A) { $scanArgs += $A }
         if ($B) { $scanArgs += @('--timeout', $B) }
         & $exe @scanArgs
+    }
+    'verify-clone' {
+        # Building the working tree proves nothing about what was committed. An ignore rule once
+        # kept a whole source directory out of the repository and every local build still passed.
+        $temp = Join-Path $env:TEMP "mbb-verify-$(Get-Random)"
+        $url = git -C $root remote get-url origin
+        if (-not $url) { throw "No 'origin' remote to clone from." }
+
+        "cloning $url"
+        git clone -q --depth 1 $url $temp
+        if ($LASTEXITCODE -ne 0) { throw "Clone failed." }
+
+        try {
+            Push-Location $temp
+            dotnet build ModbusBridge.sln -c Release --nologo -v minimal
+            if ($LASTEXITCODE -ne 0) { throw "The committed tree does not build." }
+            "the committed tree builds"
+            "for the full suite run build.ps1 in the clone - stop this rig first, it owns vJoy"
+        }
+        finally {
+            Pop-Location
+            Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
+        }
     }
     'log' {
         $n = if ($A) { [int]$A } else { 20 }

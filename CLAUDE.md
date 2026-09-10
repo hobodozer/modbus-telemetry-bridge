@@ -58,6 +58,10 @@ The app locks its own exe - **stop `ModbusBridge` before building** or the copy 
 
 ## Working style that fits this project
 
+- **A passing local build says nothing about the repository.** A `.gitignore` rule once matched
+  a source directory and kept nine files out of the commit; every local build still passed and a
+  fresh clone failed with 54 errors. Run `.ig.ps1 verify-clone` before trusting a push.
+
 - **Verify through a different path than the one that wrote the data.** vJoy is checked via winmm,
   the Modbus server via a real client socket, the HMI via `tshark`. Do this rather than trusting
   config to mean what it says.
