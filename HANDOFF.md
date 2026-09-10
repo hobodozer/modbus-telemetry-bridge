@@ -1,5 +1,30 @@
 # Handoff - state as of 2026-09-10
 
+## Pick up here
+
+Everything is committed and pushed (`2d518b2`). Windows 210 checks, Linux 149, both clean over
+repeated runs. The rig is running.
+
+**The only substantial thing open is the Avalonia GUI port.** What exists is a foundation and a
+spike, not a port:
+
+- `src/ModbusBridge.ViewModels` - shared, UI-framework-free. `HealthState` replaces `Brush`,
+  and `IDialogService`/`IUiDispatcher`/`IUiTimer` replace direct `MessageBox`/`Dispatcher` use.
+  **Only `ObservableObject` and the commands have actually moved.** `StatusViewModels`,
+  `PanelViewModels` and `MainViewModel` are still WPF-coupled and are the next step - about 940
+  lines, mechanical, and the WPF `--selftest` catches a broken binding.
+- `src/ModbusBridge.Avalonia` - a DataGrid spike over the real 317-point list, answering the one
+  question that decides the rest: Avalonia has no `DataGridComboBoxColumn` and the config editor
+  has 11, so those are done as template columns. It builds and runs on both platforms. **Nobody
+  has looked at it on screen yet** - worth doing before porting 1,254 lines of `MainWindow.xaml`
+  onto a pattern that might feel wrong. Run: `dotnet run --project src\ModbusBridge.Avalonia`
+
+Remaining after that: `MainWindow.xaml` (1254 lines), `Themes/Dark.xaml` (422, and Avalonia styling
+is selector-based rather than WPF triggers), five dialogs, the tray icon, and `MessageBox` (79 uses,
+Avalonia has none built in).
+
+
+
 Read `FINDINGS.md` first - especially sections 13-17. Section 17 is the newest and records the
 six bugs a second review pass found in code the first pass had already signed off, sorted by
 the class of mistake rather than by incident. This file is only the status summary; `README.md` is user docs.
