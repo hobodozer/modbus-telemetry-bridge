@@ -639,9 +639,27 @@ then add the user to `input`. Without it the device reports itself unavailable a
 else still runs. Reading back in a test additionally needs `/dev/input/event*`, which is why
 the readback assertions skip for a normal user and run as root.
 
-**Still Windows-only:** host statistics. CPU and memory read 0 because the collector is
-kernel32-based; `/proc/stat` and `/proc/meminfo` would fix it and have not been written.
-`winmm` timer resolution does not apply.
+**Host statistics: closed.** `LinuxHostStats` reads /proc, which needs no package - /proc is a
+filesystem. Cross-checked against the OS's own tools rather than assumed:
+
+    memTotalGb   15.6      /proc/meminfo MemTotal 16327888 kB = 15.57
+    memUsedGb     1.4      MemTotal - MemAvailable            = 1.34
+    diskPercent   1.9 %    df -h /                            = 2 %
+    logicalCpus  12        nproc                              = 12
+    cpuPercent    3.1 %    live, non-zero
+
+Two details worth keeping. CPU uses idle+iowait as idle, and stops before the guest fields,
+which are already counted inside user - summing every column double-counts them. Memory uses
+**MemAvailable, not MemFree**: MemFree excludes the page cache that Linux fills on purpose, so
+using it reports ~95% used on an idle machine.
+
+Disk was broken for a second reason: it derived the root from
+`Environment.SpecialFolder.System`, which is empty off Windows, so it returned before touching
+a drive. It uses `/` there now.
+
+**GPU is partly open.** AMD exposes `gpu_busy_percent` in sysfs and that is read; Intel needs
+perf counters and NVIDIA needs NVML, so both leave the tag alone rather than publishing a
+confident zero. `winmm` timer resolution does not apply on Linux at all.
 
 **How to repeat it.** WSL needs the .NET SDK, installed without root:
 

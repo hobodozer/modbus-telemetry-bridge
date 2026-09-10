@@ -32,7 +32,9 @@ public sealed class PcStatsCollector : IAsyncDisposable
     private long _prevRxBytes, _prevTxBytes, _prevNetTicks;
     private bool _haveNetBaseline;
 
-    private readonly GpuCounter _gpu = new();
+    // Only constructed on Windows. Off it, the GPU comes from sysfs instead, and building a
+    // PDH counter just to have it announce that PDH is unavailable is noise in the log.
+    private readonly GpuCounter? _gpu = OperatingSystem.IsWindows() ? new GpuCounter() : null;
 
     // Enumerating every process is comparatively expensive; do it rarely.
     private long _lastProcessCountTicks;
@@ -72,7 +74,7 @@ public sealed class PcStatsCollector : IAsyncDisposable
         _cts.Dispose();
         _cts = null;
         _loop = null;
-        _gpu.Dispose();
+        _gpu?.Dispose();
         Log.Info("pcstats", "Stopped.");
     }
 
@@ -108,8 +110,11 @@ public sealed class PcStatsCollector : IAsyncDisposable
 
     private void SampleCpu()
     {
-        // kernel32 is Windows-only. Elsewhere CPU stays 0 rather than taking the bridge down.
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows())
+        {
+            SampleCpuLinux();
+            return;
+        }
         if (!GetSystemTimes(out var idle, out var kernel, out var user)) return;
 
         var idleTicks = ToUInt64(idle);
@@ -131,16 +136,55 @@ public sealed class PcStatsCollector : IAsyncDisposable
         _haveCpuBaseline = true;
     }
 
+    /// <summary>
+    /// The /proc/stat counterpart. Deliberately reuses the same baseline fields as the Windows
+    /// path: both are cumulative counters where only the delta between two samples means anything,
+    /// so the first pass establishes a baseline and publishes nothing.
+    /// </summary>
+    private void SampleCpuLinux()
+    {
+        var now = LinuxHostStats.ReadCpuTimes();
+        if (!now.IsValid) return;
+
+        if (_haveCpuBaseline)
+        {
+            var idleDelta = now.Idle - _prevIdle;
+            var totalDelta = now.Total - _prevKernel;
+            if (totalDelta > 0)
+                Set("cpuPercent", Math.Clamp((1.0 - (double)idleDelta / totalDelta) * 100.0, 0, 100));
+        }
+
+        _prevIdle = now.Idle;
+        _prevKernel = now.Total;
+        _haveCpuBaseline = true;
+    }
+
     private void SampleGpu()
     {
         // Null while the counter is priming or unavailable - leave the tag untouched rather than
         // publishing a confident zero, which on a gauge is indistinguishable from an idle GPU.
-        if (_gpu.Sample() is { } percent) Set("gpuPercent", percent);
+        if (!OperatingSystem.IsWindows())
+        {
+            // AMD only - see LinuxHostStats.ReadGpuPercent. Null leaves the tag alone.
+            if (LinuxHostStats.ReadGpuPercent() is { } linuxPercent) Set("gpuPercent", linuxPercent);
+            return;
+        }
+
+        if (_gpu?.Sample() is { } percent) Set("gpuPercent", percent);
     }
 
     private void SampleMemory()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows())
+        {
+            var linux = LinuxHostStats.ReadMemory();
+            if (!linux.IsValid) return;
+            Set("memTotalGb", linux.TotalGb);
+            Set("memUsedGb", linux.UsedGb);
+            Set("memPercent", linux.UsedPercent);
+            return;
+        }
+
         var status = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
         if (!GlobalMemoryStatusEx(ref status)) return;
 
@@ -155,7 +199,11 @@ public sealed class PcStatsCollector : IAsyncDisposable
 
     private void SampleDisk()
     {
-        var root = Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.System));
+        // Environment.SpecialFolder.System is empty off Windows, so this used to bail out
+        // before touching a drive at all - disk stayed 0 on Linux for the same reason CPU did.
+        var root = OperatingSystem.IsWindows()
+            ? Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.System))
+            : "/";
         if (string.IsNullOrEmpty(root)) return;
 
         var drive = new DriveInfo(root);

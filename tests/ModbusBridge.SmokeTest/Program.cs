@@ -399,6 +399,51 @@ internal static class Program
             try { Directory.Delete(directory, true); } catch { }
         }
 
+        Section("Host statistics");
+        {
+            // These were Windows-only and read a confident zero on Linux, which on a gauge is
+            // indistinguishable from an idle machine. The assertions are platform-neutral on
+            // purpose: whatever the OS, a running collector must produce a sane total memory and
+            // a CPU figure inside 0..100, and it must take more than one pass to do it because
+            // both are deltas of cumulative counters.
+            var statsBus = new ModbusBridge.Core.Tags.TagBus();
+            var statsConfig = new PcStatsConfig { Enabled = true, IntervalMs = 200, TagPrefix = "host." };
+            var collector = new ModbusBridge.Core.Inputs.PcStatsCollector(statsConfig, statsBus);
+            collector.Start();
+            await Task.Delay(900);            // several intervals, so the CPU baseline is behind us
+            await collector.StopAsync();
+
+            double Value(string name) => statsBus.GetNumber("host." + name, double.NaN);
+
+            var totalGb = Value("memTotalGb");
+            Check(totalGb > 0.5 && totalGb < 4096,
+                  $"total memory is plausible ({totalGb:0.0} GB)");
+
+            var usedGb = Value("memUsedGb");
+            Check(usedGb > 0 && usedGb <= totalGb,
+                  $"used memory is within total ({usedGb:0.0} of {totalGb:0.0} GB)");
+
+            var memPercent = Value("memPercent");
+            Check(memPercent is > 0 and <= 100, $"memory percentage is in range ({memPercent:0.0} %)");
+
+            var cpu = Value("cpuPercent");
+            Check(!double.IsNaN(cpu) && cpu is >= 0 and <= 100,
+                  $"CPU percentage was produced and is in range ({cpu:0.0} %)");
+
+            var cpus = Value("logicalCpus");
+            Check(Math.Abs(cpus - Environment.ProcessorCount) < 0.5,
+                  $"logical CPUs matches the runtime ({cpus:0} vs {Environment.ProcessorCount})");
+
+            var processes = Value("processCount");
+            Check(processes > 1, $"process count is plausible ({processes:0})");
+
+            var diskPercent = Value("diskPercent");
+            Check(diskPercent is >= 0 and <= 100, $"disk percentage is in range ({diskPercent:0.0} %)");
+
+            var diskFree = Value("diskFreeGb");
+            Check(diskFree > 0, $"free disk is positive ({diskFree:0.0} GB)");
+        }
+
         Section("Telemetry schema chunking");
         {
             // Property names of the size the FS25 component array actually uses, enough of them to
