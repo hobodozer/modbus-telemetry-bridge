@@ -62,7 +62,8 @@ $wanted = @(
     @{ Tag = 'bridge.protocolVersion';  Label = 'protocol version' },
     @{ Tag = 'bridge.connectedClients'; Label = 'modbus clients' },
     @{ Tag = 'bridge.telemetryAgeMs';   Label = 'telemetry age' },
-    @{ Tag = 'bridge.gameCode';         Label = 'game' },
+    @{ Tag = 'bridge.gameCode';         Label = 'active game' },
+    @{ Tag = 'sim.gameRunning';         Label = 'game running' },
     @{ Tag = 'pc.cpuPercent';           Label = 'host cpu' },
     @{ Tag = 'pc.gpuPercent';           Label = 'host gpu' },
     @{ Tag = 'pc.memPercent';           Label = 'host ram' }
@@ -154,22 +155,30 @@ if ($null -ne $age) {
     else { Say 'telemetry' "$([int]$age) ms old" 'STALE' 'Yellow' }
 }
 
+# SimHub's ACTIVE game and its RUNNING game are two different facts, and the register map keeps
+# them apart on purpose: 'gameCode' is whichever game SimHub currently has selected, and it stays
+# selected long after that game exits. Whether it is actually running lives in sim.gameRunning,
+# which is also what bridge.statusFlags bit 2 is wired to.
+#
+# Reading "running" off the game code is wrong, and reporting it that way sent this script's own
+# author to tell the user FS25 was running while the machine had no such process.
 $game = Value 'bridge.gameCode'
 if ($null -ne $game) {
     $name = switch ([int]$game) {
         0 { 'none' } 1 { 'FS25' } 2 { 'Forza Horizon 6' } 3 { 'BeamNG' } 255 { 'other' }
         default { "code $([int]$game)" }
     }
-    # The block holds last values, so a game code outlives the telemetry that set it. Reporting
-    # "FS25 running" next to "telemetry never" is exactly the misreading that wastes an hour.
-    $telemetryDead = ($null -ne $age) -and ($age -ge 65535)
-    if ($game -gt 0 -and $telemetryDead) {
-        Say 'game' $name 'STALE - held from the last session' 'Yellow'
-    }
-    else {
-        Say 'game' $name $(if ($game -gt 0) { 'running' } else { 'not running' }) `
-            $(if ($game -gt 0) { 'Green' } else { 'DarkGray' })
-    }
+    Say 'active game' $name $(if ($game -gt 0) { 'selected in SimHub' } else { 'none selected' }) 'DarkGray'
+}
+
+$gameRunning = Value 'sim.gameRunning'
+if ($null -ne $gameRunning) {
+    Say 'game running' $(if ($gameRunning -gt 0) { 'yes' } else { 'no' }) `
+        $(if ($gameRunning -gt 0) { 'telemetry is from a live game' } else { 'no game process' }) `
+        $(if ($gameRunning -gt 0) { 'Green' } else { 'DarkGray' })
+}
+else {
+    Say 'game running' 'unknown' 'sim.gameRunning is not mapped' 'Yellow'
 }
 
 Write-Host ""

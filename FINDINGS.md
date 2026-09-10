@@ -523,3 +523,31 @@ is what made the O(count x points) cost obvious; the write corruption came from 
 invariant ("a refused write changes nothing") that no existing test stated. Both are now in the
 smoke test, and the probe is kept because a benchmark that only ever runs at one size proves
 nothing about scaling.
+
+---
+
+## 18. SimHub's ACTIVE game is not its RUNNING game
+
+Two different facts, and conflating them produces a confident false statement.
+
+- `DataCorePlugin.GameName` / `GameRunning` are separate properties. SimHub keeps a game
+  **selected** - that is the active game - and it stays selected long after the game exits.
+- The register map already separates them, on purpose:
+
+      138  sim.gameRunning      1 only while a game process is live
+      142  bridge.gameCode      which game SimHub has ACTIVE
+      144  bridge.simhubGame    that game's name, still set after it exits
+
+  `bridge.statusFlags` bit 2 is wired to `sim.gameRunning`, not to the game code.
+
+Observed 2026-09-10 with SimHub open and no game running: register 138 = 0, register 142 = 1,
+registers 144-159 = "FarmingSimulator25". Every one of those is correct.
+
+**Do not "fix" this by blanking the name or the code when nothing is running.** It looks like a
+stale value and is not; blanking it destroys the active/running distinction the map encodes and
+loses real information. If you want to know whether a game is running, read register 138.
+
+This was written after `tools/health.ps1` reported "game FS25 running" from the game code alone,
+and that reading was repeated to the user three times while the machine had no such process. The
+lesson is not about SimHub: a register whose name sounds like the question is not the same as a
+register that answers it.

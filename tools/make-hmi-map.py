@@ -111,11 +111,11 @@ NORM = [
     (135, "sim.drsState", "uint16", 1.0, G + "DRSEnabled", "DRS state"),
     (136, "sim.pitLimiter", "uint16", 1.0, G + "PitLimiterOn", "Pit limiter"),
     (137, "sim.inPits", "uint16", 1.0, G + "IsInPit", "In pits"),
-    (138, "sim.gameRunning", "uint16", 1.0, "DataCorePlugin.GameRunning", "Game running"),
+    (138, "sim.gameRunning", "uint16", 1.0, "DataCorePlugin.GameRunning", "Game RUNNING (1=live process)"),
     (139, "sim.paused", "uint16", 1.0, "DataCorePlugin.GamePaused", "Paused"),
     (140, "sim.fps", "uint16", 0.1, None, "Frame rate"),
     (141, "bridge.schemaVersion", "uint16", 0.01, None, "Schema version, 100 = 1.00"),
-    (142, "bridge.gameCode", "uint16", 1.0, None, "0 none 1 FS25 2 FH6 3 BeamNG 255 other"),
+    (142, "bridge.gameCode", "uint16", 1.0, None, "ACTIVE game in SimHub, not running: 0 none 1 FS25 2 FH6 3 BeamNG 255 other"),
 ]
 
 # ---- 200..266  FS25 scalars -----------------------------------------------------------
@@ -165,7 +165,7 @@ FS_SCALAR = [
 
 # ---- 272..379  FS25 text, byte counts from REGISTER_MAP.csv ---------------------------
 FS_TEXT = [
-    (144, 16, "bridge.simhubGame", None, "Active game name"),
+    (144, 16, "bridge.simhubGame", None, "ACTIVE game name in SimHub - stays set after it exits"),
     (272, 4, "fs.pluginVersion", RAW + "pluginVersion", "Plugin version"),
     (276, 16, "fs.mapTitle", RAW + "mapTitle", "Map title"),
     (292, 16, "fs.mapId", RAW + "mapId", "Map ID"),
