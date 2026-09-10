@@ -1,3 +1,4 @@
+using ModbusBridge.Telemetry;
 using ModbusBridge.Core.Config;
 using ModbusBridge.Core.Data;
 using ModbusBridge.Core.Diagnostics;
@@ -146,6 +147,47 @@ internal static class Program
 
         await VJoyEndToEndChecks.RunAsync(engine, Check, Section, Note);
         await TelemetryChecks.RunAsync(engine, TelemetryPort, Check, Section, Note);
+
+        Section("Telemetry schema chunking");
+        {
+            // Property names of the size the FS25 component array actually uses, enough of them to
+            // force several datagrams. A single-datagram schema silently truncated here.
+            var many = Enumerable.Range(0, 1300)
+                .Select(i => new TelemetryProperty(
+                    $"DataCorePlugin.GameRawData.vehicleComponents{i / 13 + 1:00}.angularVelocity{i % 13}",
+                    TelemetryValueType.Number))
+                .ToList();
+
+            var id = TelemetryProtocol.ComputeSchemaId(many);
+            var chunks = TelemetryProtocol.BuildSchema(id, many);
+            Check(chunks.Count > 1, $"a large schema splits across datagrams (got {chunks.Count})");
+            Check(chunks.All(c => c.Length <= TelemetryProtocol.MaxDatagram),
+                  "every chunk fits inside one datagram");
+
+            // Reassemble out of order: UDP does not promise arrival order.
+            var assembled = new Dictionary<int, List<TelemetryProperty>>();
+            var total = 0;
+            var idsMatch = true;
+            foreach (var chunk in chunks.AsEnumerable().Reverse())
+            {
+                var part = TelemetryProtocol.ReadSchema(chunk, chunk.Length, out var readId,
+                                                        out var index, out var count);
+                if (readId != id) idsMatch = false;
+                total = count;
+                assembled[index] = part;
+            }
+            Check(idsMatch, "every chunk carries the same schema id");
+            Check(assembled.Count == total && total == chunks.Count,
+                  $"every chunk is accounted for ({assembled.Count} of {total})");
+
+            var flat = Enumerable.Range(0, total).SelectMany(i => assembled[i]).ToList();
+            Check(flat.Count == many.Count, $"reassembly restored all {many.Count} propertie(s) (got {flat.Count})");
+            Check(flat[0].Name == many[0].Name && flat[^1].Name == many[^1].Name,
+                  "order survived reassembly, first and last match");
+
+            var single = TelemetryProtocol.BuildSchema(id, many.Take(5).ToList());
+            Check(single.Count == 1, "a small schema still fits one datagram");
+        }
 
         Section("Keyboard output");
         {

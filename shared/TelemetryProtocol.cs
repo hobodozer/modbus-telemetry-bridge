@@ -82,7 +82,16 @@ namespace ModbusBridge.Telemetry
 
     public static class TelemetryProtocol
     {
-        public const byte Version = 1;
+        /// <summary>
+        /// Wire version we emit. 2 chunked the schema; 1 sent it as a single datagram.
+        /// A reader accepts anything up to this, so a bridge keeps working with a plugin that
+        /// has not been reinstalled yet - upgrading both ends at once needs elevation, and the
+        /// two do not always get restarted together.
+        /// </summary>
+        public const byte Version = 2;
+
+        /// <summary>Oldest wire version still understood.</summary>
+        public const byte MinimumVersion = 1;
         public const int HeaderLength = 8;
 
         /// <summary>Kept well under the loopback MTU so a catalog chunk never fragments awkwardly.</summary>
@@ -118,10 +127,18 @@ namespace ModbusBridge.Telemetry
             if (length < HeaderLength) return false;
             if (buffer[0] != Magic[0] || buffer[1] != Magic[1] ||
                 buffer[2] != Magic[2] || buffer[3] != Magic[3]) return false;
-            if (buffer[4] != Version) return false;
+            if (buffer[4] < MinimumVersion || buffer[4] > Version) return false;
 
             type = (TelemetryMessageType)buffer[5];
             return true;
+        }
+
+        /// <summary>Header read that also reports the sender's wire version.</summary>
+        public static bool TryReadHeader(byte[] buffer, int length, out TelemetryMessageType type,
+                                         out byte version)
+        {
+            version = length >= HeaderLength ? buffer[4] : (byte)0;
+            return TryReadHeader(buffer, length, out type);
         }
 
         // ---- Primitive writers --------------------------------------------------------------
@@ -288,34 +305,75 @@ namespace ModbusBridge.Telemetry
             return properties;
         }
 
-        public static byte[] BuildSchema(uint schemaId, IList<TelemetryProperty> properties)
+        /// <summary>
+        /// Splits a schema across as many datagrams as it takes, the same way the catalog is split.
+        /// It used to be a single datagram, which silently truncated - and before the bounds check,
+        /// threw inside SimHub's DataUpdate - once a subscription grew past a few hundred
+        /// properties. The vehicle-component array alone is 1300.
+        /// </summary>
+        public static List<byte[]> BuildSchema(uint schemaId, IList<TelemetryProperty> properties)
         {
-            var buffer = new byte[MaxDatagram];
-            var offset = WriteHeader(buffer, TelemetryMessageType.Schema);
-            WriteUInt32(buffer, ref offset, schemaId);
-            WriteUInt16(buffer, ref offset, (ushort)properties.Count);
+            var chunks = new List<List<TelemetryProperty>>();
+            var current = new List<TelemetryProperty>();
+            var used = HeaderLength + 10;   // schema id, chunk index, chunk count, item count
 
             foreach (var property in properties)
             {
-                // Refuse to run off the end rather than throwing on the caller's thread - for
-                // the plugin that caller is SimHub's DataUpdate, where an exception stops
-                // telemetry entirely and is invisible from the bridge side.
-                var needed = 1 + 2 + Encoding.UTF8.GetByteCount(property.Name);
-                if (offset + needed > MaxDatagram) break;
+                var size = 1 + 2 + Encoding.UTF8.GetByteCount(property.Name);
+                if (used + size > MaxDatagram && current.Count > 0)
+                {
+                    chunks.Add(current);
+                    current = new List<TelemetryProperty>();
+                    used = HeaderLength + 10;
+                }
+                current.Add(property);
+                used += size;
+            }
+            if (current.Count > 0) chunks.Add(current);
+            if (chunks.Count == 0) chunks.Add(current);
 
-                buffer[offset++] = (byte)property.Type;
-                WriteShortString(buffer, ref offset, property.Name);
+            var datagrams = new List<byte[]>();
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                var buffer = new byte[MaxDatagram];
+                var offset = WriteHeader(buffer, TelemetryMessageType.Schema);
+                WriteUInt32(buffer, ref offset, schemaId);
+                WriteUInt16(buffer, ref offset, (ushort)i);
+                WriteUInt16(buffer, ref offset, (ushort)chunks.Count);
+                WriteUInt16(buffer, ref offset, (ushort)chunks[i].Count);
+
+                foreach (var property in chunks[i])
+                {
+                    buffer[offset++] = (byte)property.Type;
+                    WriteShortString(buffer, ref offset, property.Name);
+                }
+
+                var datagram = new byte[offset];
+                Buffer.BlockCopy(buffer, 0, datagram, 0, offset);
+                datagrams.Add(datagram);
             }
 
-            var datagram = new byte[offset];
-            Buffer.BlockCopy(buffer, 0, datagram, 0, offset);
-            return datagram;
+            return datagrams;
         }
 
-        public static List<TelemetryProperty> ReadSchema(byte[] buffer, int length, out uint schemaId)
+        public static List<TelemetryProperty> ReadSchema(byte[] buffer, int length, out uint schemaId,
+                                                          out int chunkIndex, out int chunkCount,
+                                                          int version = Version)
         {
             var offset = HeaderLength;
             schemaId = ReadUInt32(buffer, ref offset);
+
+            // Version 1 had no chunk fields; it was always the whole schema in one datagram.
+            if (version < 2)
+            {
+                chunkIndex = 0;
+                chunkCount = 1;
+            }
+            else
+            {
+                chunkIndex = ReadUInt16(buffer, ref offset);
+                chunkCount = ReadUInt16(buffer, ref offset);
+            }
             int count = ReadUInt16(buffer, ref offset);
 
             var properties = new List<TelemetryProperty>(count);
@@ -328,7 +386,6 @@ namespace ModbusBridge.Telemetry
             return properties;
         }
 
-        /// <summary>Builds a data frame. <paramref name="texts"/> supplies values for Text properties in order.</summary>
         public static byte[] BuildData(uint schemaId, uint sequence, long timestampMs,
                                        IList<TelemetryProperty> schema,
                                        IList<double> numbers, IList<string> texts)

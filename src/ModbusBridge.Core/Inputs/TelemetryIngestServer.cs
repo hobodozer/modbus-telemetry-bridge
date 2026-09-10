@@ -301,11 +301,64 @@ public sealed class TelemetryIngestServer : IAsyncDisposable
         try { CatalogReceived?.Invoke(complete); } catch { /* a UI handler must not break ingest */ }
     }
 
+    private bool _warnedLegacyPlugin;
+
+    /// <summary>Partial schemas, keyed by id, until every chunk of one has arrived.</summary>
+    private readonly Dictionary<uint, Dictionary<int, List<TelemetryProperty>>> _schemaChunks = new();
+
     private void HandleSchema(byte[] buffer, int length)
     {
-        var schema = TelemetryProtocol.ReadSchema(buffer, length, out var schemaId);
-        lock (_schemas) _schemas[schemaId] = schema;
-        Log.Debug(WriterId, $"Schema {schemaId:X8} with {schema.Count} propertie(s).");
+        var version = length >= TelemetryProtocol.HeaderLength
+            ? buffer[4]
+            : TelemetryProtocol.Version;
+
+        if (version < 2 && !_warnedLegacyPlugin)
+        {
+            _warnedLegacyPlugin = true;
+            Log.Warn(WriterId, $"The SimHub plugin speaks wire version {version}; this build speaks " +
+                               $"{TelemetryProtocol.Version}. Telemetry still works, but subscriptions " +
+                               "are capped at one datagram until the plugin is reinstalled.");
+        }
+
+        var part = TelemetryProtocol.ReadSchema(buffer, length, out var schemaId,
+                                                out var chunkIndex, out var chunkCount, version);
+
+        // A schema large enough to need several datagrams must not be applied until it is whole,
+        // or data frames decode against half a column list.
+        if (chunkCount <= 1)
+        {
+            lock (_schemas) _schemas[schemaId] = part;
+            Log.Debug(WriterId, $"Schema {schemaId:X8} with {part.Count} propertie(s).");
+            return;
+        }
+
+        lock (_schemas)
+        {
+            if (!_schemaChunks.TryGetValue(schemaId, out var pending))
+            {
+                pending = new Dictionary<int, List<TelemetryProperty>>();
+                _schemaChunks[schemaId] = pending;
+            }
+
+            pending[chunkIndex] = part;
+            if (pending.Count < chunkCount) return;
+
+            var complete = new List<TelemetryProperty>();
+            for (var i = 0; i < chunkCount; i++)
+            {
+                if (!pending.TryGetValue(i, out var chunk)) return;   // still missing one
+                complete.AddRange(chunk);
+            }
+
+            _schemas[schemaId] = complete;
+            _schemaChunks.Remove(schemaId);
+
+            // Ids of schemas we will never complete would otherwise accumulate across restarts.
+            if (_schemaChunks.Count > 8) _schemaChunks.Clear();
+
+            Log.Debug(WriterId, $"Schema {schemaId:X8} reassembled from {chunkCount} chunk(s), " +
+                                $"{complete.Count} propertie(s).");
+        }
     }
 
     private void HandleData(byte[] buffer, int length)

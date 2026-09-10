@@ -626,6 +626,4 @@ The UI self-test (`--selftest`) walks every tab and fails the build on any WPF b
 
 - **GPU utilisation** - the host statistics collector uses only the BCL and two kernel32 calls to
   keep the published executable dependency-free, and GPU load needs performance counters.
-- **Chunked telemetry schema.** The property catalogue is chunked across datagrams; the schema is
-  not, which caps a subscription at roughly 900 properties.
 - Run-as-service.

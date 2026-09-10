@@ -65,7 +65,7 @@ while (DateTime.UtcNow < deadline)
     }
     else if (type == TelemetryMessageType.Schema && checkConfig != null)
     {
-        var resolved = TelemetryProtocol.ReadSchema(buffer, buffer.Length, out _);
+        var resolved = TelemetryProtocol.ReadSchema(buffer, buffer.Length, out _, out _, out _);
         var got = resolved.Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         Console.WriteLine("");
         Console.WriteLine($"plugin resolved {got.Count} of {wanted.Count} subscribed propertie(s):");

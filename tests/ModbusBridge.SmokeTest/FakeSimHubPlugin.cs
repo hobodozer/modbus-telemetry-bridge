@@ -58,7 +58,7 @@ internal sealed class FakeSimHubPlugin : IDisposable
             .Select(n => Catalog.FirstOrDefault(p => p.Name == n) ?? new TelemetryProperty(n, TelemetryValueType.Number))
             .ToList();
         _schemaId = TelemetryProtocol.ComputeSchemaId(_schema);
-        Send(TelemetryProtocol.BuildSchema(_schemaId, _schema));
+        foreach (var chunk in TelemetryProtocol.BuildSchema(_schemaId, _schema)) Send(chunk);
     }
 
     /// <summary>Sends one sample. Values are supplied per property name.</summary>

@@ -58,8 +58,11 @@ new hat checks, after every change below.
    come from there; the hard-coded stopgap in the engine is gone.
 2. Registers 1, 141, 200, 201, 240, 241 are mapped but nothing computes them; they read 0.
 3. Register 7 (GPU %) - the collector does not gather it. Needs PDH `GPU Engine` counters.
-4. Components mapped to 16 of the map's 100. ~66 is the ceiling before the schema exceeds UDP's
-   65507 limit; true 100 needs the schema chunked like the catalog. See FINDINGS section 15.
+4. Components are mapped to 16 of the map's 100. The schema is chunked now, so the old ceiling is
+   gone - raise it with `python tools\make-hmi-map.py rig\configridge.json --components 100`.
+   **The installed plugin still speaks wire version 1**, so until it is reinstalled (needs
+   elevation and SimHub closed) subscriptions stay capped at one datagram. The bridge logs a
+   warning saying so and keeps working meanwhile.
 5. The learn dialog and output panel have **no automated coverage of their behaviour** - the
    self-test walks tabs, not dialogs. Two bugs in the learn dialog were found by the user, not tests.
 6. FS25 `playTime` units are unconfirmed (tag read 167; could be seconds or minutes).

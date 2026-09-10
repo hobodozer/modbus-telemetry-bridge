@@ -137,7 +137,8 @@ namespace ModbusBridge.SimHubPlugin
             if (_schemaDirty || _framesSent % 200 == 0)
             {
                 _schemaDirty = false;
-                Send(TelemetryProtocol.BuildSchema(_schemaId, schema));
+                foreach (var chunk in TelemetryProtocol.BuildSchema(_schemaId, schema))
+                    Send(chunk);
             }
 
             SendSample(schema);
