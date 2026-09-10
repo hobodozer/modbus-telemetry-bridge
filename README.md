@@ -352,6 +352,40 @@ Everything comes from the BCL or two kernel32 calls, so the published executable
 no-third-party-dependency property. GPU load is the exception and is not collected: it needs
 performance counters, which would mean a package.
 
+## Recording and replay
+
+Captures tags to CSV and plays them back, so an HMI screen, a vJoy mapping or a register map can be
+exercised with no game and no PLC attached.
+
+```jsonc
+"recording": {
+  "enabled": true,
+  "directory": "recordings",     // relative to the data directory
+  "tags": ["sim.*", "plc1.di.*"],
+  "intervalMs": 100,
+  "onChangeOnly": false,         // skip rows where nothing moved
+  "maxRows": 0                   // 0 records until the engine stops
+}
+```
+
+Columns are fixed when recording starts, so a tag created later is not added mid-file - a CSV whose
+column count changes partway is painful for everything that reads it. The timestamp is elapsed
+milliseconds rather than wall clock, so a capture made on one machine replays correctly on another.
+
+```jsonc
+"replay": {
+  "enabled": true,
+  "path": "recordings/session.csv",
+  "speed": 1.0,                  // 2 is twice as fast, 0.5 half
+  "loop": true,
+  "tagPrefix": "back."           // replay into a separate namespace
+}
+```
+
+Replay is a source like any other and publishes under its own writer id, so the tag monitor shows
+where a value came from. Give it a `tagPrefix` to play a capture back alongside live data instead
+of fighting it - useful for comparing a recorded session against what is happening now.
+
 ## Finding devices
 
 Modbus has no discovery: a client is told its address map by configuration and can never ask for
@@ -534,4 +568,4 @@ The UI self-test (`--selftest`) walks every tab and fails the build on any WPF b
   keep the published executable dependency-free, and GPU load needs performance counters.
 - **Chunked telemetry schema.** The property catalogue is chunked across datagrams; the schema is
   not, which caps a subscription at roughly 900 properties.
-- CSV record/replay, per-game profile switching, run-as-service.
+- Per-game profile switching, run-as-service.

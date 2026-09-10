@@ -11,3 +11,4 @@ rig/
 tools/tia/bin/
 .claude/settings.local.json
 tools/tia/*.log
+recordings/

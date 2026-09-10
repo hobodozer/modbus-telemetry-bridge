@@ -147,6 +147,73 @@ internal static class Program
         await VJoyEndToEndChecks.RunAsync(engine, Check, Section, Note);
         await TelemetryChecks.RunAsync(engine, TelemetryPort, Check, Section, Note);
 
+        Section("CSV record and replay");
+        {
+            var recordDir = Path.Combine(Path.GetTempPath(), "mbbridge-record-" + Guid.NewGuid().ToString("N")[..8]);
+            var pattern = "rec.*";
+
+            Check(ModbusBridge.Core.Diagnostics.TagRecorder.Matches("sim.*", "sim.speedKph"), "glob: prefix wildcard matches");
+            Check(!ModbusBridge.Core.Diagnostics.TagRecorder.Matches("sim.*", "plc1.speed"), "glob: a non-match is rejected");
+            Check(ModbusBridge.Core.Diagnostics.TagRecorder.Matches("*.estop", "plc1.di.estop"), "glob: suffix wildcard matches");
+            Check(ModbusBridge.Core.Diagnostics.TagRecorder.Matches("*", "anything"), "glob: bare star matches everything");
+
+            var a = engine.Tags.GetOrAdd("rec.number");
+            var b = engine.Tags.GetOrAdd("rec.text");
+            a.Set(ModbusBridge.Core.Tags.TagValue.Good(1), "test");
+            b.Set(ModbusBridge.Core.Tags.TagValue.GoodText("hello, world"), "test");
+
+            var recording = new RecordingConfig
+            {
+                Enabled = true, Directory = recordDir, FileName = "capture.csv",
+                IntervalMs = 20, Tags = { }
+            };
+            recording.Tags.Clear();
+            recording.Tags.Add(pattern);
+
+            var recorder = new ModbusBridge.Core.Diagnostics.TagRecorder(recording, engine.Tags);
+            recorder.Start();
+
+            // Move the values while recording so the file holds a ramp rather than a constant.
+            for (var i = 1; i <= 8; i++)
+            {
+                a.Set(ModbusBridge.Core.Tags.TagValue.Good(i * 10), "test");
+                await Task.Delay(25);
+            }
+            await recorder.StopAsync();
+
+            var file = Path.Combine(recordDir, "capture.csv");
+            Check(File.Exists(file), "the recording file was written");
+            var lines = File.ReadAllLines(file);
+            Check(lines.Length > 2, $"the recording has data rows (got {lines.Length - 1})");
+            Check(lines[0].StartsWith("elapsedMs,"), "the header starts with elapsedMs");
+            // A value containing a comma has to survive the round trip.
+            Check(lines.Any(l => l.Contains("\"hello, world\"")), "text with a comma is quoted");
+
+            // Replay into a separate namespace so the originals are untouched and comparable.
+            a.Set(ModbusBridge.Core.Tags.TagValue.Good(-1), "test");
+            var replay = new ReplayConfig
+            {
+                Enabled = true, Path = file, Speed = 20, TagPrefix = "back."
+            };
+            var replayer = new ModbusBridge.Core.Inputs.TagReplayer(replay, engine.Tags);
+            Check(replayer.Load(), "the recording loads");
+            Check(replayer.ColumnCount == 2, $"both tags are columns (got {replayer.ColumnCount})");
+
+            replayer.Start();
+            await Task.Delay(1200);
+            await replayer.StopAsync();
+
+            var replayedNumber = engine.Tags.Find("back.rec.number");
+            var replayedText = engine.Tags.Find("back.rec.text");
+            Check(replayedNumber is not null && replayedNumber.Value.Number == 80,
+                  $"replay ended on the last recorded value (got {replayedNumber?.Value.Number})");
+            Check(replayedText?.Value.Text == "hello, world",
+                  $"text replayed intact (got '{replayedText?.Value.Text}')");
+            Check(a.Value.Number == -1, "replaying into a prefix left the original tag alone");
+
+            try { Directory.Delete(recordDir, true); } catch { }
+        }
+
         Section("Network scanner");
         {
             var cidr = ModbusBridge.Core.Modbus.ModbusScanner.ParseCidr("10.1.2.0/30");

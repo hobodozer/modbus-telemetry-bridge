@@ -37,6 +37,7 @@ public partial class App : Application
         var dataDirectory = ResolveDataDirectory(e.Args);
         var configPath = ResolveConfigPath(e.Args, dataDirectory);
 
+        Paths.DataDirectory = dataDirectory;
         Log.LogDirectory = Path.Combine(dataDirectory, "logs");
         Log.WriteToFile = true;
         Log.Info("app", $"Modbus Telemetry Bridge starting. Data directory: {dataDirectory}");

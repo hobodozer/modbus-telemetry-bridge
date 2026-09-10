@@ -46,6 +46,8 @@ public sealed class BridgeEngine : IAsyncDisposable
     private TelemetrySimulator? _simulator;
     private PcStatsCollector? _pcStats;
     private readonly List<DerivedRuntime> _derived = new();
+    private TagRecorder? _recorder;
+    private TagReplayer? _replayer;
     private ModbusTcpServer? _virtualPlc;
     private VirtualPlcStore? _virtualPlcStore;
     private CancellationTokenSource? _housekeepingCts;
@@ -67,6 +69,8 @@ public sealed class BridgeEngine : IAsyncDisposable
     public TelemetryIngestServer? Telemetry => _telemetry;
     public TelemetrySimulator? Simulator => _simulator;
     public PcStatsCollector? PcStats => _pcStats;
+    public TagRecorder? Recorder => _recorder;
+    public TagReplayer? Replayer => _replayer;
 
     /// <summary>Raised after a start, stop or reload so the UI can rebind its lists.</summary>
     public event Action? TopologyChanged;
@@ -186,6 +190,19 @@ public sealed class BridgeEngine : IAsyncDisposable
     private void StartSimulation()
     {
         BuildDerivedTags();
+
+        // Replay starts before recording so a capture never records its own playback by accident.
+        if (Config.Replay.Enabled)
+        {
+            _replayer = new TagReplayer(Config.Replay, Tags);
+            _replayer.Start();
+        }
+
+        if (Config.Recording.Enabled)
+        {
+            _recorder = new TagRecorder(Config.Recording, Tags);
+            _recorder.Start();
+        }
 
         if (Config.PcStats.Enabled)
         {
@@ -405,6 +422,18 @@ public sealed class BridgeEngine : IAsyncDisposable
             {
                 await _pcStats.StopAsync().ConfigureAwait(false);
                 _pcStats = null;
+            }
+
+            if (_recorder is not null)
+            {
+                await _recorder.StopAsync().ConfigureAwait(false);
+                _recorder = null;
+            }
+
+            if (_replayer is not null)
+            {
+                await _replayer.StopAsync().ConfigureAwait(false);
+                _replayer = null;
             }
 
             if (_virtualPlc is not null)
